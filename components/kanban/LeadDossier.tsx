@@ -38,6 +38,67 @@ function formatBRL(cents: number | null, currency: string | null): string {
   }
 }
 
+const fieldLabels: Record<string, string> = {
+  company: "Empresa",
+  projectType: "Tipo de projeto",
+  message: "Mensagem do pedido",
+  sourcePage: "Página do formulário",
+  entryPage: "Primeira página visitada",
+  formPage: "Página do formulário",
+};
+
+function humanizeFieldName(key: string): string {
+  return (
+    fieldLabels[key] ??
+    key
+      .replace(/[_-]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+  );
+}
+
+function readableFieldValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return "—";
+}
+
+function SiteLeadContext({ lead }: { lead: Lead }) {
+  const fields = Object.entries(lead.custom_fields ?? {}).filter(
+    ([key, value]) => key !== "timestamp" && key !== "website" && value !== "",
+  );
+  const campaign = Object.entries(lead.source_metadata ?? {}).filter(
+    ([key, value]) => key.startsWith("utm_") && typeof value === "string" && value,
+  );
+  if (!fields.length && !campaign.length) return null;
+  return (
+    <section className="space-y-3 rounded-sm border border-border p-3">
+      <h3 className="text-xs font-medium uppercase tracking-wide text-text-muted">
+        Contexto do site
+      </h3>
+      {fields.length ? (
+        <dl className="grid gap-2 text-sm">
+          {fields.map(([key, value]) => (
+            <div key={key} className="grid gap-0.5">
+              <dt className="text-xs text-text-muted">{humanizeFieldName(key)}</dt>
+              <dd className="whitespace-pre-wrap break-words text-text">{readableFieldValue(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+      {campaign.length ? (
+        <dl className="grid gap-2 border-t border-border pt-3 text-sm sm:grid-cols-2">
+          {campaign.map(([key, value]) => (
+            <div key={key} className="grid gap-0.5">
+              <dt className="text-xs text-text-muted">{humanizeFieldName(key)}</dt>
+              <dd className="break-words text-text">{readableFieldValue(value)}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </section>
+  );
+}
+
 /**
  * O dossiê do negócio: cabeçalho vivo → timeline → campos.
  *
@@ -131,6 +192,8 @@ export function LeadDossier({
         )}
 
         <ConversaNoDossie conversa={lead.conversa} />
+
+        <SiteLeadContext lead={lead} />
 
         {/* ② timeline */}
         <section className="flex-1 py-3">
