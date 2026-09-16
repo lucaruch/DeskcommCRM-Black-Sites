@@ -8,6 +8,7 @@ Este repositório mantém as customizações da Black Sites e acompanha o Deskco
 - Ela busca `upstream/main`, cria ou atualiza a branch `automation/sync-upstream` e abre um pull request.
 - O merge nunca é automático: migrations, worker, imagens Docker e testes devem ser revisados antes de entrar em `main`.
 - Se houver conflito, a rotina falha e preserva `main` intacta para resolução manual.
+- O workflow de release com GitHub App permanece reservado ao repositório oficial; o fork não copia credenciais nem tenta executar esse corte.
 
 ## Sincronização local
 
