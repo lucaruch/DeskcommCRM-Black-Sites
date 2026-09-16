@@ -367,6 +367,7 @@ async function ingestOne(
         message,
         settings.approval === "automatic",
         dryRun,
+        consent,
         runId,
         score,
         consent,
