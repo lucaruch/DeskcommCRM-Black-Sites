@@ -236,13 +236,23 @@ export interface GateContext {
   spinningEnforced?: boolean;
   /**
    * Arma o `agendaStallGate`. Ausente = no-op — mesma direção segura de
-   * `internalVocabularyEnforced` (caller que não conhece o campo não arma nada). `active`
-   * é o agente publicado ter `crm_book_appointment` nas tools deste turno (mesma condição
-   * de `AGENDA_SYSTEM_BLOCK` em `inbound-turn.ts`); `toolCalledThisTurn` é se
-   * `crm_find_free_slots`/`crm_book_appointment`/`crm_reschedule_appointment` já foi
-   * chamada neste turno (rastreado no call site, que é quem monta as tools).
+   * `internalVocabularyEnforced` (caller que não conhece o campo não arma nada).
+   *
+   * `active` é o agente ter QUALQUER ferramenta de agenda neste turno, e não só a de
+   * marcar. ⚠️ Já foi `crm_book_appointment` sozinho, e isso desarmava o gate exatamente
+   * onde ele é mais necessário: no agente que CONSULTA a agenda e não marca — o arranjo
+   * de quem quer que uma pessoa confirme cada horário (clínica, salão, consultório).
+   * Esse agente tem `crm_find_free_slots`, promete "vou verificar e te aviso" do mesmo
+   * jeito, e ficava sem a única cura determinística que existe para isso.
+   *
+   * `podeMarcar` não arma nem desarma: ele decide o TEXTO do veto. Mandar um agente que
+   * só consulta "chamar crm_book_appointment" é ensinar uma ferramenta que ele não tem —
+   * o modelo tenta, falha, e a correção vira um segundo defeito.
+   *
+   * `toolCalledThisTurn` é se alguma delas já foi chamada neste turno (rastreado no call
+   * site, que é quem monta as tools).
    */
-  agenda?: { active: boolean; toolCalledThisTurn: boolean };
+  agenda?: { active: boolean; podeMarcar: boolean; toolCalledThisTurn: boolean };
 }
 
 /**
@@ -506,14 +516,19 @@ export const agendaStallGate: Gate = {
     return {
       pass: false,
       code: 'agenda_stall_sem_ferramenta',
-      reason: confirmedSemChecar
-        ? 'Você afirmou que um horário está confirmado/agendado sem ter chamado ' +
-          'crm_find_free_slots, crm_book_appointment ou crm_reschedule_appointment NESTE ' +
-          'turno. Nunca diga que está confirmado sem a ferramenta ter registrado de fato — ' +
-          'chame a ferramenta e responda com base no retorno dela.'
-        : 'Você prometeu verificar/confirmar um horário sem ter chamado crm_find_free_slots, ' +
-          'crm_book_appointment ou crm_reschedule_appointment NESTE turno. Chame a ferramenta ' +
-          'agora e responda com base no retorno dela — não repita a promessa sem checar.',
+      // As ferramentas nomeadas são as que ESTE agente tem. Ver `podeMarcar`.
+      reason: (() => {
+        const ferramentas = ctx.agenda.podeMarcar
+          ? 'crm_find_free_slots, crm_book_appointment ou crm_reschedule_appointment'
+          : 'crm_find_free_slots';
+        return confirmedSemChecar
+          ? `Você afirmou que um horário está confirmado/agendado sem ter chamado ${ferramentas} ` +
+            'NESTE turno. Nunca diga que está confirmado sem a ferramenta ter registrado de fato — ' +
+            'chame a ferramenta e responda com base no retorno dela.'
+          : `Você prometeu verificar/confirmar um horário sem ter chamado ${ferramentas} NESTE ` +
+            'turno. Chame a ferramenta agora e responda com base no retorno dela — não repita a ' +
+            'promessa sem checar.';
+      })(),
     };
   },
 };
@@ -824,7 +839,7 @@ export interface RunBeforeSendArgs {
    * Arma o `agendaStallGate` para ESTA tentativa — ver `GateContext.agenda`. Ausente = gate
    * no-op (retrocompatível com todo caller que não conhece agenda, ex.: `followup-turn.ts`).
    */
-  agenda?: { active: boolean; toolCalledThisTurn: boolean };
+  agenda?: GateContext['agenda'];
   /**
    * Enviado SÓ se TODOS os gates passarem — ChannelAdapter (própria tx/idempotência). Recebe o
    * corpo FINAL (o disclosureGate F4-05 pode emendá-lo via `amendBody`): quem monta o send DEVE

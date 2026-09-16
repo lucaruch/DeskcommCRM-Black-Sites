@@ -903,6 +903,7 @@ create unique index idx_recovery_unique on public.user_recovery_codes(user_id, c
 - `contact.created`
 - `contact.updated`
 - `contact.deleted`
+- `contact.delete_blocked`
 - `contact.blocked`
 - `contact.unblocked`
 - `consent.granted`

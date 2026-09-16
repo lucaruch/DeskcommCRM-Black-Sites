@@ -400,9 +400,205 @@ junto com o disco do 12-bis: são os dois instrumentos da triagem que falham em 
 
 ---
 
+## 3-quinquies. Fila grande — a integração em lote, e o gate que ela esconde
+
+**Gatilho: mais de ~10 PRs abertos.** Abaixo disso, trie e mergeie um a um. Acima, um a um é a
+decisão errada, e a razão se mede antes de começar:
+
+```bash
+git fetch origin --force $(for n in $(gh pr list --state open --limit 100 --json number \
+  --jq '.[].number'); do printf "pull/%s/head:refs/tri/%s " "$n" "$n"; done)
+for n in $(git for-each-ref --format='%(refname:short)' refs/tri/ | sed 's#refs/tri/##'); do
+  git diff --name-only origin/main...refs/tri/$n | sed "s/^/$n\t/"
+done | cut -f2 | sort | uniq -c | sort -rn | head
+```
+
+Medido em 14/09/2026, com 74 PRs abertos: `lib/i18n/dicionario.ts` tocado por **25** PRs,
+`supabase/migrations/MANIFEST.md` por **23**, `supabase/baseline.sql` por **21**. Ali todo mundo
+acrescenta no mesmo lugar, então **cada merge quebra o próximo** — e quem paga é o contribuinte
+seguinte, que recebe num PR limpo um conflito que não é dele.
+
+O caminho é uma **branch de integração**, com `git merge --no-ff` de cada head. Três coisas fazem
+isso funcionar, e cada uma já falhou quando ausente:
+
+1. **Merge de verdade, nunca squash.** O head precisa virar ancestral da `main` — é assim que o
+   GitHub fecha o PR como **Merged**, com o nome do autor. Confirmado em 14/09: os 14 do lote 1
+   fecharam `MERGED` sozinhos. Squash os fecharia como `CLOSED`, que é o que desanima quem
+   contribuiu de graça.
+2. **Conflito de apêndice resolve-se ficando com OS DOIS LADOS** (`dicionario.ts`, `baseline.sql`,
+   `MANIFEST.md`, `lib/audit/actions.ts`, as listas de `e2e.yml`). Se o arquivo não for de
+   apêndice, **pare e resolva à mão** — um `Sidebar.tsx` no meio disso é conflito semântico.
+
+   **Duas armadilhas desta resolução, as duas pagas em 14/09:**
+
+   **(a) Ela não vale quando os dois lados acrescentam a MESMA chave.** O #744 e o #806 traduziram
+   as mesmas 24 entradas do dicionário; ficar com os dois produziu propriedades repetidas e
+   `TS1117`. Num arquivo de 8 mil linhas isso não se vê lendo o diff — quem vê é o `tsc`. Depois de
+   resolver por apêndice, **rode o typecheck antes de seguir**, e ao deduplicar prove que nada
+   sumiu com o nome normalizado (`"Alertas"` e `Alertas` são a mesma propriedade; comparar com
+   aspas acusa seis chaves "perdidas" que são justamente as duplicatas).
+
+   **(b) O laço que aborta o merge desfaz também o que já tinha resolvido.** Se o script resolve o
+   arquivo A e recusa o B, o `git merge --abort` leva o A junto. Ao refazer o merge à mão para
+   tratar o B, é fácil dar `git add` no A **ainda cru** — e commitar marcador de conflito. Foi o que
+   aconteceu: 16 linhas de `<<<<<<<` no `AGENTS.md`, pegas por
+   `tests/unit/sem-marcador-de-conflito.test.ts` e não pela minha releitura. Depois de qualquer
+   merge refeito à mão, o controle é uma linha:
+
+   ```bash
+   git grep -n '^<<<<<<<\|^>>>>>>>' -- . && echo "PARE: marcador versionado"
+   ```
+3. **Meça se o merge ACONTECEU, não se houve conflito.** `git diff --diff-filter=U` vazio quer
+   dizer "sem conflito agora" — inclusive quando o merge sequer foi tentado porque um hook
+   bloqueou o commit anterior. A medida certa é o `HEAD` ter andado:
+
+   ```bash
+   antes=$(git rev-parse HEAD); git merge --no-ff ... ; [ "$antes" = "$(git rev-parse HEAD)" ] && echo "NÃO andou"
+   ```
+
+   Isto me custou duas rodadas em 14/09: o laço reportou "OK, sem conflito" para seis PRs que o
+   `pre-commit` tinha barrado, e o log lido de cima parecia sucesso.
+4. **Antes de escolher quem entra: leia o CORPO e o estado de rascunho — a ancestralidade por SHA
+   não vê empilhamento por CONTEÚDO.** Em 15/09, `git merge-base --is-ancestor` entre #861, #862 e
+   #865 respondeu "independentes", e o corpo do #865 dizia *"rascunho empilhado — contém os commits
+   do #861 e do #862"*. O autor tinha **recriado** um dos commits (SHA novo, patch idêntico). A
+   sonda que responde "está empilhado?" compara PATCH, não ponta:
+
+   ```bash
+   git log --oneline origin/main..refs/tri/<topo>                     # os commits do topo, um a um
+   git show <commit> | git patch-id --stable                           # mesmo patch-id = mesmo trabalho
+   git cherry -v refs/tri/<base> refs/tri/<topo>                       # "-" = já está na base
+   ```
+
+   Integrar base e topo no mesmo lote faz o mesmo conteúdo entrar duas vezes por caminhos
+   diferentes: conflito em todo arquivo da base ou, pior, merge limpo com bloco de apêndice
+   duplicado. **E PR em rascunho não entra no lote.** Rascunho é o autor dizendo "não terminei";
+   mede-se e comenta-se (a revisão de segurança vale como comentário antecipado), mas integrá-lo
+   tira dele o rebase que ele mesmo anunciou.
+
+### ⚠️ O gate que o lote esconde: `build`
+
+`typecheck`, `lint`, `lint:channels`, `test:unit`, `test:shell` e `test:db` **não constroem o
+app**. Medido em 14/09: o lote 2 passou nos seis, com 823 arquivos de teste e 194 de invariante
+verdes, e **o `build` quebrou no CI** — `FATAL: An unexpected Turbopack error occurred: Is a
+directory (os error 21)`, na hora de emitir o `.nft.json`.
+
+A causa era um glob de `outputFileTracingIncludes` que casava um **symlink de plataforma** do pnpm.
+Nada disso é alcançável por teste: o defeito mora no **emit**, não no import.
+
+> **Num lote, rode `pnpm build` antes de abrir o PR.** É o gate mais caro e o único que cobre a
+> classe inteira de "o artefato não se monta" — que é justamente o artefato que o self-hoster
+> instala.
+
+### O teto do CHANGELOG impõe o ritmo do trem: um lote, uma release
+
+`tests/unit/changelog-cabe-na-tela-da-vps.test.ts` reprova quando a seção que os fragmentos de
+`.changes/` produziriam passa de **30.000 bytes** — o corte que o `agent.sh` aplica sobre o arquivo
+tagueado. Além dele, o dono da VPS recebe o texto cortado no meio, ou pior: a tela troca o histórico
+por *"este histórico pode não alcançar a sua versão"*.
+
+Num trem de lotes isso vira uma **regra de ordem**, não um defeito a consertar. Medido em 14/09:
+
+```
+lote 2 sozinho ...... 31 fragmentos → cabe, 1.21.0 + minor = 1.22.0
+lote 3 (herda o 2) .. 42 fragmentos → 40.667 bytes, REPROVA
+lote 4 (herda os 2) . 42+ fragmentos → REPROVA
+```
+
+O vermelho do lote 3 não é do lote 3: é dele **carregando os fragmentos do lote 2**. Quando o lote 2
+entra e a release é cortada, os 31 são consumidos e o seguinte volta a caber.
+
+> **Logo: cada lote corta a sua versão antes de o próximo entrar.** Não é preferência de processo —
+> é o que o teto do changelog permite. Empilhar quatro lotes e cortar uma release só reprova, e a
+> mensagem do teste ("enxugue o corpo dos fragmentos") aponta para o conserto errado nesse caso: o
+> problema não é fragmento gordo, é lote empilhado.
+
+Antes de declarar vermelho num lote, confira se o vermelho some com o corte anterior:
+
+```bash
+ls .changes/*.md | wc -l          # quantos fragmentos este lote carrega
+pnpm release:conferir             # e que versão eles produzem juntos
+```
+
+---
+
+### A fila de CI é finita, e destravá-la toda de uma vez a entope
+
+Liberar workflow parado (passe 1) é certo. Fazê-lo para 36 branches num minuto criou **144
+execuções** e uma fila de 100 — e os PRs de integração, que são os que decidem, foram para o fim
+dela. Duas correções, ambas medidas no mesmo dia:
+
+- Aprove **só o run mais recente por branch e por workflow**; o resto é CI de push velho.
+- Assim que um PR entra numa branch de integração, **cancele os runs dele** — o gate dele passou a
+  ser o da integração. Em 14/09 isso devolveu **81 execuções** à fila.
+
+---
+
+## 3-sexies. Renumerar migration quando o conflito é entre CONTRIBUINTES
+
+O passe 4-bis resolve o caso "nosso lado contra o deles": quem cede somos nós. Ele não cobre o caso
+que aparece em fila grande — **oito PRs de oito pessoas reivindicando o mesmo `NNNN`**, todos
+corretos pela régua que lhes foi dada (`ls supabase/migrations/`), nenhum com como ver a fila.
+
+Não existe escolha que preserve a numeração de todos. O critério que sobrevive a auditoria é
+**ordem de merge**: quem entra primeiro fica com o que pediu.
+
+É arbitrário **de propósito**. Qualquer critério de mérito — PR maior, autor mais antigo, "quem
+abriu primeiro" — puniria alguém por uma colisão que ele não podia enxergar. Escreva o critério no
+corpo do commit, com a tabela de quem ficou com o quê, para a próxima pessoa poder conferir.
+
+**Renumere por ferramenta, e escope a substituição.** Um script que troca `0239` por `0244` no
+`baseline.sql` inteiro reescreve o rótulo de apêndice de **outros** PRs que por acaso citavam
+aquele número — aconteceu em 14/09, e quem denunciou foi o teste de um terceiro PR. O rótulo se
+confere contra o **nome do arquivo** da migration, que é a fonte da verdade:
+
+```bash
+git diff --name-only <base>..HEAD -- supabase/migrations/ | grep '\.sql$' \
+  | sed -E 's/.*_([0-9]{4})_.*/\1/' | sort | uniq -c | awk '$1>1{print "DUPLICADO: "$2}'
+```
+
+**São TRÊS artefatos que acompanham o nome do arquivo, não dois.** O MANIFEST e o rótulo do
+apêndice no `baseline.sql` estão nos lugares onde se procura. O terceiro não: **teste que cita o
+caminho da migration**. Ele guarda o conteúdo do arquivo lendo-o do disco, e o vermelho chega como
+`ENOENT: no such file or directory` — que não se parece com renumeração incompleta.
+
+Varra a classe, não a instância — num trem com sete renumerações, o grep custa um segundo:
+
+```bash
+for n in <lista dos NNNN que você mexeu>; do grep -rl "$n" tests lib app; done
+```
+
+E confira as duas dimensões depois, porque `NNNN` único não garante timestamp único:
+
+```bash
+ls supabase/migrations/*.sql | sed -E 's#.*/([0-9]+)_.*#\1#' | sort | uniq -d   # timestamps
+ls supabase/migrations/*.sql | sed -E 's/.*_([0-9]{4})_.*/\1/' | sort | uniq -d  # NNNN
+```
+
+---
+
 ## 4. Complemento — o que os gates não provam
 
 `references/complemento-do-ci.md`, linha por linha, com o gatilho de cada uma no diff.
+
+**A parte mecânica disto é um script**, e rodá-lo é o primeiro ato do passe:
+
+```bash
+bash triagem/scripts/complemento.sh <n>   # uma linha CHAVE<TAB>VALOR por checagem
+```
+
+Ele mede a prévia do merge, a tripla de migration e a colisão de `NNNN`, RLS de tabela nova,
+`security definer` sem `revoke`, `console.log`, env var nos dois arquivos, kit self-host,
+catraca de canal, workflow de fork, fragmento em `.changes/` e `## [X.Y.Z]` à mão. **Toda
+linha que ele devolve é medição, nenhuma é veredito** — quem decide é você, quem refuta é o
+cético.
+
+O que ele **não** faz é o julgamento, e é onde o seu tempo rende: duplicata entre PRs, nicho
+contra genérico, e se o teste vigia comportamento ou símbolo.
+
+**Ele precisa dos heads no clone.** Sem `git fetch origin pull/<n>/head`, `git merge-tree`
+responde `not something we can merge` e a prévia sai como CONFLITO — em 14/09 isso pintaria
+**74 de 74** PRs de vermelho, e o número seria do instrumento, não dos PRs.
 
 Esta é a razão de a triagem existir tecnicamente. Repetir o que o CI já faz é teatro; o trabalho é o
 que ele **não** alcança — e a lista não é opinião, é o que foi medido: a tripla de migration é
@@ -714,6 +910,35 @@ nesses dois casos — mas **a razão vai escrita no corpo do commit, com a medi�
 no uso da variável. A linha do segundo caso é a mais importante: o hook da migration **não é rede
 para renumeração**, e quem lê a mensagem dele achando que é vai renumerar contra uma régua cega.
 
+### E há o caso oposto, que é pior: o merge LIMPO não chama hook nenhum
+
+A tabela acima trata do hook que dispara quando não devia. O furo mais caro é o hook que **não
+dispara quando devia** — e num trem de lotes ele é a regra, não a exceção.
+
+`git merge` que termina **sem conflito** cria o commit sozinho e **não roda o `pre-commit`**. Dois
+PRs que trazem migrations de nomes diferentes (`…_0241_lembrete_em_degraus.sql` e
+`…_0241_rascunho_de_agente_sem_numero.sql`) não conflitam textualmente — então o merge sai limpo, o
+commit nasce sem o hook, e o `0241` duplicado entra calado.
+
+Medido em 14/09: o #804 entrou assim no lote 6, com o `0241` que o #770 já ocupava na `main` desde
+o lote 2. Nenhuma guarda viu. Quem viu foi a sonda abaixo, rodada depois de montar o lote.
+
+**Num trem, a colisão de migration se mede na ÁRVORE montada, nunca se confia no hook:**
+
+```bash
+ls supabase/migrations/*.sql | sed -E 's/.*_([0-9]{4})_.*/\1/'   | sort | uniq -d   # NNNN
+ls supabase/migrations/*.sql | sed -E 's#.*/([0-9]+)_.*#\1#'     | sort | uniq -d   # timestamp
+```
+
+Vazio nas duas é o esperado. Rode depois de **cada** merge que traga migration, e **sempre** antes
+de abrir o PR do lote — com **linha de base** contra a `origin/main`: se ela também devolver a
+duplicata, o número é antigo e não do lote.
+
+Linha de base não é controle positivo, e a diferença importa: a `main` limpa devolvendo vazio não
+prova que a sonda enxerga — prova só que não há dívida herdada. O controle positivo é a sonda **ter
+achado** uma duplicata real alguma vez; em 14/09 foi o `0241` do #804. Sem esse registro, vazio nas
+duas é indistinguível de instrumento morto.
+
 ---
 
 ## 8-quinquies. O PR cujo conteúdo foi REESCRITO — o merge de história
@@ -946,12 +1171,61 @@ gh release list --limit 1                                # a release é a Latest
 ```
 ---
 
+## 12-ter. O PR cujo conteúdo entrou DERIVADO — o merge de proveniência
+
+Reconciliação (passe 8) produz uma branch **nossa** que não contém o head do contribuinte: o
+conteúdo foi reimplementado a partir do que ele achou, porque a versão original conflitava com o
+estado de hoje ou carregava um defeito que a reconciliação consertou.
+
+O desfecho automático disso é o PR dele fechar como **`CLOSED`**. E isso é o registro mentindo: o
+trabalho entrou.
+
+O conserto é um **merge de proveniência** — `git merge -s ours` do head dele na sua branch:
+
+```bash
+antes=$(git rev-parse HEAD^{tree})
+git merge -s ours --no-edit -m "Merge PR #<n> de @<autor> — <título> (proveniência: entrou derivado)" refs/tri/<n>
+[ "$antes" = "$(git rev-parse HEAD^{tree})" ] || echo "PARE: a árvore mudou, não era para mudar"
+```
+
+`-s ours` **não traz árvore nenhuma** — e a asserção acima é obrigatória, porque é ela que separa
+"registrar proveniência" de "importar conteúdo sem querer". O que muda é só o grafo: com o head
+virando ancestral, o GitHub fecha como **`MERGED`**, e é essa diferença que aparece no perfil e na
+contagem de contribuições de quem trabalhou de graça.
+
+Escreva no corpo do commit **por que** foi derivado. Um merge `ours` sem explicação, daqui a seis
+meses, parece alguém tendo descartado o trabalho de outra pessoa.
+
+Medido em 14/09: seis PRs (#745, #739, #782, #784, #789, #794) fechariam `CLOSED` com o conteúdo
+deles dentro da `main`. `git merge-base --is-ancestor refs/tri/<n> <sua-branch>` responde isso
+antes, e é barato conferir os seus todos de uma vez.
+
+---
+
 ## 12-bis. Higiene de disco: um worktree por agente custa 1,2 GB
 
 A regra "um worktree por agente" (modo de falha 5) tem um custo que ninguém tinha medido: com
 `node_modules` real — obrigatório, porque symlink quebra o Turbopack —, **cada worktree pesa 1,2 a
 2,5 GB**. Quinze deles encheram o disco no meio da fila, e `ENOSPC` derruba build, agente e
 `gh` de uma vez, com mensagem que não parece falta de espaço.
+
+**Num trem de lotes a regra muda, e o gatilho é outro.** O worktree de um lote NÃO pode ser
+removido quando o PR dele é mergeado — o lote seguinte é montado em cima dele. O que se acumula é
+pior: cada `pnpm build` deixa **1,0 a 1,3 GB** de cache do Turbopack em `.next/`, e num trem de cinco
+lotes isso soma mais que os `node_modules`.
+
+Medido em 14/09: o disco chegou a **170 MB livres** e o `build` do lote 5 morreu com
+
+```
+failed to write to file `.../.next/cache/turbopack/.../00000031.sst`: No space left on device
+```
+
+— que **não se parece com falta de espaço** quando lido no meio de um log de build, e é fácil
+confundir com defeito do lote. Remover os worktrees já entregues devolveu 6 GB; apagar os `.next/`
+devolveu mais 2,4 GB.
+
+O gatilho certo no trem: **remova o worktree de um lote quando a VERSÃO dele estiver publicada**, não
+quando o PR entrar — e apague o `.next/` de qualquer lote que você não vá reconstruir agora.
 
 Remova o worktree assim que o PR dele for mergeado — não ao fim da sessão:
 
@@ -1019,6 +1293,10 @@ Cada um destes foi cometido de verdade nesta casa, e é por isso que estão escr
     **319 linhas** enquanto o do `origin/main` tinha **1800**. Vinte seções nunca foram lidas —
     inclusive o 0-bis, que a triagem reinventou do zero achando que era passe novo. A primeira linha
     da sessão é `git show origin/main:triagem/TRIAGEM.md`, e o controle é `wc -l` nos dois.
+    **Reincidiu em 14/09/2026**, nesta mesma casa e com o número pior: disco 319, `main` **2106**
+    — 6,6× — e de novo a triagem começou a reescrever como "aprendizado novo" passes que já
+    estavam lá. Duas vezes o mesmo erro quer dizer que a regra escrita não basta: rode o `wc -l`
+    dos dois **antes** de abrir o arquivo, não depois de decidir que ele está incompleto.
 13. `gh run view --log-failed` devolve *"run is still in progress"* enquanto **outro job do mesmo
     run** estiver pendente — e isso lê como "não consegui medir". Meça pelo job (`--job <id> --log`)
     ou espere o run inteiro fechar.
@@ -2104,3 +2382,149 @@ Cada um destes foi cometido de verdade nesta casa, e é por isso que estão escr
     isolado, antes de escrever uma linha de diagnóstico. Três `console.log` num teste de invariante
     custam uma rodada de `test:db` e trocam uma teoria por um número. O silêncio dele torna a
     acusação fácil demais — e é exatamente por isso que ela precisa de prova.
+
+53. **`git diff --diff-filter=U` vazio lido como "mergeou".** Vazio quer dizer "sem conflito
+    agora" — inclusive quando o merge sequer foi tentado, porque um hook barrou o commit anterior.
+    A medida é o `HEAD` ter andado: `antes=$(git rev-parse HEAD)` e comparar depois. Em 14/09 um
+    laço reportou "OK, sem conflito" para seis PRs que o `pre-commit` tinha bloqueado.
+
+54. **Os gates verdes lidos como "o lote está pronto".** `typecheck`, `lint`, `lint:channels`,
+    `test:unit`, `test:shell` e `test:db` **não constroem o app**. Medido em 14/09: os seis verdes
+    (823 arquivos de teste, 194 de invariante) e o `build` vermelho no CI — `Is a directory
+    (os error 21)`, num glob que casava symlink de plataforma do pnpm. O defeito mora no **emit**,
+    onde nenhum teste chega. Num lote, `pnpm build` antes de abrir o PR.
+
+55. **Substituição de texto global ao renumerar migration.** Trocar `0239` por `0244` no
+    `baseline.sql` inteiro reescreve o rótulo de apêndice de **outros** PRs que citavam o número.
+    Aconteceu em 14/09, e quem denunciou foi o teste de um terceiro PR. Escope pelo nome do
+    arquivo da migration, que é a fonte da verdade.
+
+56. **`sed` para inserir texto multilinha.** Ele recusa com `unescaped newline inside substitute
+    pattern`, e dentro de um laço isso falha **no meio** enquanto o resto segue: em 14/09, 11 de 29
+    vereditos não foram postados e o laço imprimiu "vereditos postados" no fim. Texto com mais de
+    uma linha vai por Python, e o laço confere o `returncode` de cada envio.
+
+
+57. **Reconciliação que REMOVE um artefato e deixa o inventário que o declarava.** Tirar um
+    workflow, uma rota ou uma tela é metade do conserto: a outra metade é o mapa que a enumera
+    (`GATILHO_ESPERADO`, `vercel.ts`, `registry.ts`, `SPECS_PARTE_*`). Em 14/09 removi o workflow
+    de deploy de um fork e deixei as três entradas dele no `GATILHO_ESPERADO` — e não vi porque, no
+    worktree da reconciliação, rodei só o teste que eu sabia afetado. **Depois de reconciliar, rode
+    a suíte, não o arquivo.** O arquivo que você lembra é o que você já sabe; o que quebra é o que
+    você não pensou.
+
+58. **Duas reconciliações feitas em ordem diferente da ordem de merge.** Reconciliei o `vercel.ts`
+    do #767 antes de o #805 entrar no lote; o #805 criou um cron que aquele `vercel.ts` não
+    conhecia. Cada reconciliação estava certa contra a árvore em que foi feita. **Inventário se
+    confere na árvore do LOTE montado, depois do último merge** — nunca na branch de reconciliação
+    isolada.
+
+59. **Exit 1 com zero falhas, e as duas sondas concordando em zero.** O rodapé `Tests … 0 failed` e
+    o `grep FAIL` vazio não esgotam o que reprova uma suíte: erro não tratado sai numa terceira
+    linha, `Errors N error`. Em 15/09 a suíte de um lote saiu `exit=1` com 866 arquivos passados.
+    O exit code é a autoridade; quando ele diverge, leia `Errors` — e prove que é carga rodando o
+    arquivo apontado **isolado, mais de uma vez**, e depois a suíte de novo na árvore final.
+
+60. **Gate de merge que já estava vermelho, consertado pela metade.** Um PR chegou com `verify`
+    E `invariants` vermelhos. Consertei o `verify` e assumi que o `invariants` era a mesma causa,
+    sem abrir o log. Não era — era um invariante que o PR tinha atualizado em uma de duas linhas
+    irmãs. **Cada job vermelho tem o seu log.** Dois vermelhos não são um defeito até o segundo
+    log dizer que são.
+
+61. **O instrumento de medição mentiu em três direções no mesmo lote.** Em 15/09 o
+    `triagem/scripts/complemento.sh` entregou ao dossiê do lote 8 três números que eram dele, não
+    dos PRs — e o analista só não os herdou porque conferiu cada um:
+    - **SIGPIPE com `pipefail`.** `echo "$DIFF" | grep -q` devolve 141 em diff grande (o `grep -q`
+      fecha o pipe no primeiro acerto e o `echo` morre). A sonda lia FALSO justamente quando achava:
+      `rls_enable AUSENTE — bloqueador` no #865 com a linha duas vezes no diff, e
+      `migration_constraint`, `migration_idempotente` e `falha_em_verde` simplesmente **sumiam** —
+      o último era o achado real do PR. Conserto: here-string (`grep ... <<<"$DIFF"`), sem pipe.
+    - **Comentário casado como código.** `definer_revoke: SEM revoke` no #861, que não cria função
+      nenhuma: casou em `+-- \`security definer\` nova ⇒ ... não é acionado`. Conserto: as sondas
+      semânticas leem só linhas acrescentadas em arquivo de código, sem comentário.
+    - **`.test.tsx` fora da conta.** `muda fonte SEM teste` no #860, que trazia
+      `agenda-confirmar-pela-tela.test.tsx`. A `main` tem mais de cem `.test.tsx`.
+
+    O controle que prova o conserto tem **quatro quadrantes**, não um: definer em CÓDIGO e em
+    COMENTÁRIO, cada um em diff PEQUENO e GRANDE. O script antigo errava nos dois sentidos —
+    acusava o comentário no diff pequeno e perdia o código no grande. Um controle só com o caso
+    que motivou o conserto teria aprovado metade dele.
+
+62. **Renumerar migration de PR que trouxe invariante novo: a prosa muda, o fixture fica.** Ao
+    renumerar a `0255` do #861 para `0257`, a troca com escopo alcançou três rótulos de valor de
+    teste (`"segredo-de-app-de-teste-0255"`) dentro de `tests/invariants/` — e o `pre-commit`
+    barrou, porque invariante é congelado **mesmo quando nasceu no mesmo lote**. O rótulo de
+    fixture não cita a migration: é texto sem efeito. Troque só a frase que aponta para a
+    migration (comentário, MANIFEST, rótulo do apêndice, caminho lido por teste) e deixe o valor.
+
+63. **O PR que devia fechar sozinho continua `OPEN` logo depois do merge do lote.** Em 15/09 o #841
+    apareceu `OPEN` com o lote 7 já `MERGED`, e o head dele já era ancestral da `main`. O GitHub
+    processa o fechamento por ancestralidade com atraso de dezenas de segundos. **Meça a
+    ancestralidade antes de agir** (`git merge-base --is-ancestor <head> origin/main`); se for
+    ancestral, espere e releia — reabrir, comentar ou mergear de novo nesse intervalo produz ruído
+    no PR de quem contribuiu.
+
+64. **Prove a JORNADA DO MOTIVO, não a função que o PR mudou.** O #858 dizia no corpo "hoje isso é
+    impossível **até pela tela**: o `PainelDeMarcacao` monta as opções da lista de slots" — e mudou
+    só o servidor. Dossiê, três consertadores e o cético mediram o servidor (sabotagens, 620 casos)
+    e ficaram verdes; só a QA em tela viu que a dona do negócio continuava sem conseguir o encaixe.
+    **Antes de medir, copie a frase "Como apareceu"/"O que muda" do PR para o briefing do dossiê e
+    escreva a jornada que ela descreve.** É essa que precisa ficar verde — e, se a tela não a
+    oferece, a triagem constrói a porta (foi o que entrou no lote 8) ou declara no fragmento.
+
+65. **Fatia que promete "pela tela" e entrega a action sem chamador.** O #861 cumpria a fatia F3 da
+    issue #850 ("App Secret e verify token **pela tela**") com tabela, action e leitura na rota — e
+    `git grep updateMetaApp -- app components hooks lib` só achava a própria action. A sonda é
+    barata e vai no passe 4: **toda server action ou rota nova tem ao menos um chamador fora do
+    próprio arquivo e dos testes?** Sem chamador, a capacidade não existe para quem opera, e o
+    fragmento que a anuncia é falso.
+
+66. **Invariante de GRANT de tabela no `test:db` é verde por construção.** O prelude de
+    `scripts/test-db.sh` simula o default ACL do Supabase para FUNÇÕES e não para TABELAS; num
+    Supabase real toda tabela nova de `public` nasce com `arwdDxt` para `anon`, `authenticated` e
+    `service_role`, e o dump só ACRESCENTA grants. O #873 revogou TRUNCATE de `api_audit_log`, o
+    invariante saiu verde, e o cético mostrou `service_role: DELETE 1` com o default ACL reproduzido
+    — a frase "append-only, nem `service_role`" do `CLAUDE.md` já era falsa na `main`. **Todo PR que
+    afirme "papel X não pode Y na tabela Z" é medido com `grant all on table … to anon,
+    authenticated, service_role` na transação ANTES do bloco do PR** (issue #887 pede o prelude).
+
+67. **Dedupe por `kind` faz o aviso menos grave tampar o mais grave.** O #871 estendeu `event_dead` à
+    morte do despacho da IA; com um `event_dead` de mídia aberto, "a IA deixou de responder" não
+    abria. Ao estender um aviso deduplicado a um caso novo, **meça com outro aviso do mesmo kind já
+    aberto** — a contagem "1000 mortes → 1 aviso" sozinha aprova o defeito.
+
+68. **Número de migration prometido a PR que não entrou é dívida com o contribuidor.** Escrevi no
+    #867 "fica com `0258`" e no #865 "`0259`"; vinte minutos depois chegaram #873 e #874 com
+    migration, gates verdes e sem decisão pendente — e entraram antes. Tive de editar os dois
+    comentários. **O número é de quem ENTRA primeiro**; ao contribuidor diga "o próximo livre na hora
+    da integração".
+
+69. **`bash scripts/test-db.sh` sem o `pnpm` é gate que não rodou.** O prelúdio imprime `✓ install ok`
+    e `✓ update ok`, e depois `vitest: comando não encontrado`, exit 127 — as linhas verdes estão no
+    log, os invariantes não. O caminho é `pnpm test:db`. E `pnpm test:db -- <arquivo>` **não
+    filtra**: roda os 200 (três agentes pagaram 10 minutos por isso no mesmo dia).
+
+70. **Não mova o HEAD de um worktree com gates rodando.** Um merge de proveniência (#860, árvore
+    idêntica) entrou no worktree do lote enquanto o `test:unit` corria. Inofensivo desta vez, mas o
+    log dos gates passou a declarar um SHA que já não era o HEAD. Proveniência entra **depois** dos
+    gates, ou o resumo dos gates declara o **tree** (`git rev-parse HEAD^{tree}`), que é o que o
+    teste mediu.
+
+71. **A vigia que engole a falha do `gh` fica calada durante uma queda de rede.** O monitor de um
+    re-run tinha `gh … || { sleep 30; continue; }` e expirou em 30 minutos "sem eventos": a rede tinha
+    caído (um agente morreu com `ENOTFOUND` no mesmo intervalo) e o run já tinha terminado verde.
+    Silêncio de vigia não é "ainda rodando". **Conte as falhas seguidas do instrumento e emita aviso a
+    partir de N**, como qualquer outro estado terminal.
+
+72. **Vermelho de e2e num lote que não toca a área: meça o intermitente antes de investigar o lote.**
+    O lote 9 (#893) caiu em `logo-moldura-no-tema-escuro` nas duas tentativas, sem nenhum arquivo de
+    marca, cache ou layout no diff. O trace mostrou `POST /api/v1/marca/logo` 200 e a barra lateral
+    ainda com a marca do produto 15 s depois — o sintoma de uma corrida que o próprio
+    `lib/branding/instalacao.ts` documenta. Re-run no mesmo SHA: verde. **A ordem é: diff do lote ×
+    área da spec; trace da falha; re-run no mesmo SHA; e só então concluir.** O intermitente vira
+    issue com o trace (#895), não conserto dentro do lote.
+
+73. **`git commit … | tail; echo "rc=$?"` imprime `rc=0` com o commit BARRADO.** Reincidência do
+    "pipe mascara exit" (lote 9, título do aviso da Central): o pre-commit recusou, o `tail` saiu 0, e
+    a linha seguinte afirmava o commit. **Em commit, a sonda é o HEAD ter andado**
+    (`antes=$(git rev-parse HEAD)` … comparar), nunca um exit impresso depois de pipe.

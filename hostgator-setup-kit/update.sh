@@ -115,9 +115,13 @@ if [ -z "$SKIP_BACKUP" ]; then
   if bash "$(dirname "$0")/backup.sh"; then
     c_grn "✓ backup feito — se algo der errado, dá pra restaurar (restore.sh)."
   else
+    if [ -n "${DESKCOMM_AGENT_REPORT:-}" ] || [ ! -t 0 ]; then
+      die "O backup preventivo falhou. Atualização automática interrompida para proteger os dados."
+    fi
     c_ylw "⚠ o backup falhou. A atualização NÃO apaga dados (só reorganiza os contatos),"
-    c_ylw "  mas o ideal é ter backup. Ctrl+C pra parar e investigar; continuo em 8s…"
-    sleep 8
+    c_ylw "  mas o ideal é ter backup."
+    read -r -p "Deseja continuar MESMO SEM BACKUP? Digite 'CONTINUAR': " conf
+    [ "$conf" = "CONTINUAR" ] || die "Atualização cancelada pelo operador para investigar a falha do backup."
   fi
 fi
 # Avisa o agente do host (se for ele quem está dirigindo) — é o que faz a tela
@@ -285,13 +289,16 @@ dc up -d
 # com o Traefik nas portas 80/443. O resultado era um "⚠ não consegui recriar o
 # proxy" em TODA atualização de quem usa proxy externo: alarme falso, num
 # momento em que o dono precisa confiar no que está lendo.
-if [ "${REVERSE_PROXY:-caddy}" = "traefik" ]; then
-  c_grn "✓ proxy externo (Traefik): o Caddy não é usado aqui — nada a recarregar"
-else
+case "${REVERSE_PROXY:-caddy}" in
+traefik|npm)
+  c_grn "✓ proxy externo (${REVERSE_PROXY}): o Caddy não é usado aqui — nada a recarregar"
+  ;;
+*)
   dc up -d --force-recreate --no-deps caddy >/dev/null 2>&1 \
     && c_grn "✓ proxy recarregado com a configuração desta versão" \
     || c_ylw "⚠ não consegui recriar o proxy — rode: docker compose $(dc_files) up -d --force-recreate caddy"
-fi
+  ;;
+esac
 
 # ── 6. O app voltou no ar? ───────────────────────────────────────────────────
 step "Conferindo se o app voltou no ar"

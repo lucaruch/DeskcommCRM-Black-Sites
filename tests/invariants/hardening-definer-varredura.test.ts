@@ -136,6 +136,16 @@ const AUTHENTICATED_PERMITIDO: readonly Excecao[] = [
       "negação agent/viewer/cross-org e ausência de efeito recusado.",
   },
   {
+    fn: "fn_definir_cliente_pela_agenda(uuid,boolean)",
+    razao:
+      "app/actions/settings/definirClientePelaAgenda.ts chama com createClient da sessão; " +
+      "auth.uid() exige admin da própria organização, suporte de escrita e MFA comprovado " +
+      "antes de gravar settings.crm e classificar o histórico. " +
+      "tests/invariants/cliente-nasce-do-agendamento.test.ts prova admin próprio, negação de " +
+      "manager/agent/viewer, admin de outra organização, sem sessão, aal1 com fator e suporte " +
+      "somente leitura/vencido.",
+  },
+  {
     fn: "emit_event(text,text,uuid,jsonb,jsonb,uuid)",
     razao:
       "Server Actions chamam com a sessão do usuário " +

@@ -350,6 +350,25 @@ const schema = z.object({
   APP_ACCENT_HEX: z.string().optional().default(""),
 
   /**
+   * Com o que a instalação NASCE quanto a cadastro: `aberto` (padrão) ou
+   * `so_convite`. Vazio = `aberto`, que é como o produto sempre funcionou.
+   *
+   * O BANCO ESTÁ ACIMA DISTO. Havendo linha em `platform_settings` — o que
+   * acontece assim que alguém usa a tela em `/admin/cadastro` —, é ela que
+   * manda. Esta variável responde nas duas situações em que o banco não tem o
+   * que dizer: instalação que nunca abriu a tela, e app que subiu e ainda não
+   * conseguiu ler o banco. A segunda é o motivo de ela existir: sem um piso
+   * declarado, uma instalação deliberadamente fechada abriria nessa janela.
+   *
+   * `z.string()` e NÃO `z.enum`, pelo mesmo motivo escrito ao lado de
+   * `APP_ACCENT_HEX`: um enum lançaria no import do módulo, que no Next é a
+   * PRIMEIRA REQUISIÇÃO — e com healthcheck de probe TCP o Docker mostraria
+   * `healthy` com 100% das requisições em 500. Valor irreconhecível degrada em
+   * `lib/auth/politica-de-cadastro.ts`, com erro no log.
+   */
+  SIGNUP_MODE: z.string().optional().default(""),
+
+  /**
    * Par VAPID do Web Push. Opcionais: sem elas a bandeja só funciona com a aba
    * viva (Notification API + SW local). Gerar: `npx web-push generate-vapid-keys`.
    */
@@ -381,6 +400,17 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+if (env.NODE_ENV === "production") {
+  const vercelCron = process.env.CRON_SECRET?.trim();
+  if (vercelCron) {
+    // ponytail: Vercel Cron só manda Bearer CRON_SECRET. Sem copiar, o Pro
+    // agenda e a rota responde 403. Teto: se os dois segredos precisarem ser
+    // distintos, as rotas passam a aceitar os dois numa lista — INTERNAL_SECRET
+    // continua valendo como fallback nas rotas.
+    env.INTERNAL_CRON_SECRET = vercelCron;
+  }
+}
 
 // Soft warning for env-gated AI keys (worker degrades gracefully but operators
 // should know when the bot is silent for config reasons).

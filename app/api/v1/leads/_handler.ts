@@ -87,6 +87,16 @@ function actorAuditPayload(actor: Actor): {
       metadataActor: { actor_type: "webhook_source", actor_id: actor.id },
     };
   }
+  // TOKEN DE SERVIDOR é caso próprio, e não o `else` de `ai_agent`: sem esta
+  // linha ele seria auditado como agente de IA, e o audit passaria a afirmar que
+  // uma integração é um agente — a única coisa que o audit não pode fazer é
+  // mentir sobre quem agiu.
+  if (actor.type === "api_token") {
+    return {
+      actorUserId: null,
+      metadataActor: { actor_type: "api_token", actor_api_token_id: actor.id },
+    };
+  }
   return {
     actorUserId: null,
     metadataActor: {

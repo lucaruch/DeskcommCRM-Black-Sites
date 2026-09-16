@@ -47,6 +47,11 @@ jobs:
       - name: Channel provider leak
         run: pnpm lint:channels
 
+      # Auditoria de autorização e papel: impede comparações diretas de papel
+      # fora de lib/auth/ que contornem o gate de MFA e requireRole().
+      - name: Role rank audit
+        run: pnpm lint:role-rank
+
       - name: Unit tests
         run: pnpm test:unit
 

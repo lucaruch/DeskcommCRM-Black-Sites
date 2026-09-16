@@ -19,6 +19,7 @@ import { deriveVideoText } from "@/lib/messaging/media/video-derive";
 import { apiTranscriptionProvider } from "@/lib/messaging/media/transcription";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DETALHE_TECNICO } from "@/lib/event-log/aviso-de-evento-morto";
 
 export const MEDIA_DERIVE_CONSUMER_KEY = "media_derive_v1";
 const DRAIN_MAX_ATTEMPTS = 5; // espelho de lib/event-log/drain.ts
@@ -76,6 +77,13 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
       .maybeSingle();
     if (!flag) return { consumer_key, status: "skipped", detail: "video_frames_disabled" };
   }
+
+  /** O que o operador chama de "isto" — o aviso não pode falar em `msg.type`. */
+  const rotuloDoTipo =
+    ({ image: "imagem", audio: "áudio", document: "documento", video: "vídeo" } as Record<
+      string,
+      string
+    >)[msg.type] ?? "mídia";
 
   const markFailed = async () => {
     await admin.from("messages").update({ media_derived_status: "failed" })
@@ -164,6 +172,45 @@ export async function deriveMessageMedia(row: EventRow): Promise<HandlerResult> 
     if (row.attempts >= DRAIN_MAX_ATTEMPTS - 1) {
       logger.error("[media-derive] failed permanently", { message_id: msg.id, detail });
       await markFailed();
+      // ─── E AVISA. Desistir calado era o desfecho mais comum ────────────────
+      //
+      // As recusas que este worker já sabia explicar — modelo sem visão,
+      // provedor indisponível, falta de chave da OpenAI para transcrever —
+      // abrem `midia_nao_lida` lá embaixo, e por isso pareciam cobrir o
+      // assunto. Não cobriam: o que estoura como EXCEÇÃO (credencial recusada,
+      // modelo que a conta não pode usar, tempo esgotado, e também o download
+      // do Storage que falhou) cai aqui, marcava `failed` e não dizia nada.
+      //
+      // Medido numa VPS em produção (org real, 14/09): quatro imagens JPEG com
+      // `media_derived_status='failed'`, os quatro eventos mortos em
+      // `event_log` com "The model `claude-sonnet-5` does not exist or you do
+      // not have access to it" — e a Central com ZERO avisos de mídia.
+      //
+      // O QUE A CENTRAL MOSTRA NESTA TENTATIVA: dois avisos, não um. Este
+      // handler devolve `error` na tentativa em que `drainEventLog` desiste
+      // (`row.attempts + 1 >= 5`, o mesmo limiar de `DRAIN_MAX_ATTEMPTS`), e o
+      // dreno abre `event_dead` para o evento morto. Cada um só abre se não
+      // houver outro da mesma família aberto na organização — então, numa pane,
+      // são no máximo um de cada. O `event_dead` diz que um processamento
+      // parou; este diz o que fazer (a orientação da política aponta
+      // Provedores de IA).
+      //
+      // ⚠️ Aqui o agente NÃO recebeu o marcador de "não consegui interpretar":
+      // a exceção não grava `media_derived_text`, e o turno já seguiu sem o
+      // texto no teto de espera do dreno do agent-engine. Por isso a
+      // consequência é outra que a das recusas, e vai explícita.
+      //
+      // O `detail` entra porque é a frase do PROVEDOR, e é ela que distingue
+      // "chave errada" de "modelo que sua conta não assina" — duas ações
+      // diferentes para quem opera. Mas entra no FIM, como detalhe técnico:
+      // é inglês de API, e quem lê a Central não programa.
+      await avisarMidiaNaoLida(
+        msg.organization_id,
+        rotuloDoTipo,
+        "a leitura deu erro em todas as tentativas, ao abrir o arquivo ou ao chamar o provedor de IA",
+        "O conteúdo do arquivo não chegou ao agente.",
+        detail.slice(0, 200),
+      );
     }
     return { consumer_key, status: "error", detail };
   }
@@ -327,10 +374,37 @@ export const MARCADOR_NAO_LIDA = "[o cliente enviou uma mídia que não consegui
  *
  * Fire-and-forget: falhar ao avisar não pode derrubar a derivação da mídia.
  */
+/**
+ * O título e o corpo do aviso `midia_nao_lida`. Primeiro o que houve e o que
+ * fazer, em português; a frase crua do provedor, quando existe, no fim e
+ * rotulada (`DETALHE_TECNICO`) — mesma regra do aviso de evento morto.
+ */
+export function textoDoAvisoDeMidiaNaoLida(aviso: {
+  tipo: string;
+  motivo: string;
+  consequencia: string;
+  detalheTecnico?: string;
+}): { title: string; body: string } {
+  return {
+    title: `O agente não conseguiu ler ${aviso.tipo} que o cliente enviou`,
+    body:
+      `Motivo: ${aviso.motivo}. ${aviso.consequencia} ` +
+      `Para resolver, ajuste o modelo desse ponto em Agente de IA → Provedores, ou cadastre a chave necessária em Credenciais.` +
+      (aviso.detalheTecnico ? ` ${DETALHE_TECNICO} ${aviso.detalheTecnico}` : ""),
+  };
+}
+
 async function avisarMidiaNaoLida(
   organizationId: string,
   tipo: string,
   motivo: string,
+  /**
+   * O que aconteceu com o atendimento. O padrão vale para as recusas, que
+   * entregam o marcador ao agente; a falha permanente não entrega nada.
+   */
+  consequencia = "Enquanto isso, o agente responde avisando que não conseguiu abrir o arquivo.",
+  /** A frase crua do provedor ou do armazenamento, quando houver — vai no fim, rotulada. */
+  detalheTecnico?: string,
 ): Promise<void> {
   try {
     const admin = createAdminClient();
@@ -352,10 +426,7 @@ async function avisarMidiaNaoLida(
       organization_id: organizationId,
       kind: "midia_nao_lida",
       severity: "warn",
-      title: `O agente não conseguiu ler ${tipo} que o cliente enviou`,
-      body:
-        `Motivo: ${motivo}. Enquanto isso, o agente responde avisando que não conseguiu abrir o arquivo. ` +
-        `Para resolver, ajuste o modelo desse ponto em Agente de IA → Provedores, ou cadastre a chave necessária em Credenciais.`,
+      ...textoDoAvisoDeMidiaNaoLida({ tipo, motivo, consequencia, detalheTecnico }),
     });
     // E o retorno é CONFERIDO. O supabase-js devolve `{ error }` em vez de
     // lançar, então o `catch` abaixo era inalcançável para erro de banco: a

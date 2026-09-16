@@ -524,6 +524,7 @@ function ColunaDeDia({
   pessoas,
   onAbrir,
   destacado,
+  soNoDesktop,
   interacao,
   proposta,
   arrasteDoCard,
@@ -534,6 +535,13 @@ function ColunaDeDia({
   pessoas: Pessoa[];
   onAbrir?: (id: string) => void;
   destacado: boolean;
+  /**
+   * Some abaixo de `md`. Na semana, o celular mostra UM dia por vez: sete
+   * colunas em 360px dão ~44px cada, e a célula de meia hora vira um alvo de
+   * ~44x24 — errar o toque passa a ser o caso comum, não a exceção. Com uma
+   * coluna só, o mesmo alvo fica com a largura inteira da tela.
+   */
+  soNoDesktop?: boolean;
   interacao?: InteracaoDaGrade;
   proposta?: PropostaDeRemarcacao | null;
   arrasteDoCard?: {
@@ -551,6 +559,7 @@ function ColunaDeDia({
       data-testid={`coluna-dia-${format(dia, "yyyy-MM-dd")}`}
       className={cn(
         "relative min-w-0 flex-1 border-r border-border last:border-r-0",
+        soNoDesktop && "max-md:hidden",
         destacado && "bg-surface-elevated/40",
       )}
     >
@@ -977,6 +986,7 @@ export function GradeDaAgenda({
                 pessoas={pessoas}
                 onAbrir={onAbrirAgendamento}
                 destacado={visao === "semana" && isSameDay(d, agora)}
+                soNoDesktop={visao === "semana" && !isSameDay(d, ancora)}
                 interacao={interacao}
                 proposta={proposta}
                 arrasteDoCard={arrasteDoCard}

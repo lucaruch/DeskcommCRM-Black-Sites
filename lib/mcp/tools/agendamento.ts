@@ -443,7 +443,10 @@ export const crmBookAppointment: McpToolDefinition<typeof marcarShape> = {
     "`crm_schedule_followup`. A diferença: aqui as DUAS partes combinaram e alguém vai esperar; " +
     "lá é decisão interna nossa e o cliente não sabe de nada. " +
     "Chame `crm_find_free_slots` ANTES e use um `starts_at` que veio de lá — marcar em horário que " +
-    "não está livre é recusado, e a recusa manda você consultar de novo.",
+    "não está livre é recusado, e a recusa manda você consultar de novo. " +
+    "⚠️ Alguns atendimentos exigem que uma pessoa da equipe aprove: nesses, o horário fica " +
+    "RESERVADO e o retorno traz `aguarda_confirmacao: true`. Quando vier assim, NÃO diga que está " +
+    "confirmado — diga que separou o horário e que a equipe confirma.",
   inputSchema: marcarShape,
   category: "write",
   requiresRole: "ai_operator",
@@ -470,7 +473,46 @@ export const crmBookAppointment: McpToolDefinition<typeof marcarShape> = {
           ...(input.notes ? { notes: input.notes } : {}),
         },
       );
-      return { marcado: true, compromisso: r, ...(r.meeting_state === "pending" ? { mensagem: "O compromisso foi marcado; o link ainda está sendo criado. Não invente um link nem afirme que ele já foi enviado." } : {}) };
+      /**
+       * ⚠️ MARCADO NÃO É CONFIRMADO, e o modelo precisa ouvir isso em voz alta.
+       *
+       * Um tipo com `requires_confirmation` nasce `pending`: o horário fica
+       * RESERVADO (some da lista de livres, e outra marcação no mesmo horário é
+       * recusada), mas alguém da equipe ainda precisa dizer sim. É o arranjo de
+       * quem quer que uma pessoa aprove cada atendimento.
+       *
+       * Até aqui, a única pista disso era `status: "pending"` enterrado dentro
+       * de `compromisso` — enquanto a descrição desta tool diz "o cliente conta
+       * com ele" e o bloco de sistema da agenda manda o modelo dizer que está
+       * confirmado depois de marcar. O produto ENSINAVA o modelo a afirmar
+       * "está marcado!" num compromisso que ainda podia ser recusado, e o
+       * cliente ouviria uma confirmação que ninguém deu.
+       *
+       * Os dois "pending" deste retorno são coisas diferentes e coincidem no
+       * nome: `status` é o do compromisso, `meeting_state` é o do link do Meet.
+       * Por isso as mensagens são separadas e nomeadas.
+       */
+      const aguardaConfirmacao = r.status === "pending";
+      const avisos = [
+        aguardaConfirmacao
+          ? "O horário ficou RESERVADO para esta pessoa, e ninguém mais consegue pegá-lo — mas " +
+            "ainda NÃO está confirmado: alguém da equipe precisa aprovar. Não diga que está " +
+            "confirmado, marcado ou garantido. Diga que o horário foi separado e que a equipe " +
+            "confirma."
+          : null,
+        r.meeting_state === "pending"
+          ? "O link ainda está sendo criado. Não invente um link nem afirme que ele já foi enviado."
+          : null,
+      ].filter(Boolean);
+
+      return {
+        marcado: true,
+        compromisso: r,
+        // Campo próprio, além da mensagem: um booleano no topo é o que o modelo
+        // enxerga sem precisar interpretar prosa.
+        aguarda_confirmacao: aguardaConfirmacao,
+        ...(avisos.length > 0 ? { mensagem: avisos.join(" ") } : {}),
+      };
     }),
 };
 

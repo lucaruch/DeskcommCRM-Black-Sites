@@ -1,4 +1,5 @@
 import { setExecutionAgentOperation } from '@/lib/atendimento/fronteira-server';
+import { TIPOS_DE_CASO, TIPOS_DE_CASO_PARA_A_IA } from "@/lib/ai/case-copy";
 import { DEFAULT_CHANNEL_PROVIDER } from '@/lib/channels/capabilities';
 import { applyPreviewPolicy, previewGateContext, type TurnPreview } from './preview';
 import { claimOfJob } from '../queue/claim';
@@ -39,7 +40,9 @@ import type { ChannelAdapter, ChannelSendResult } from '../channel-adapter';
 
 import { withFields, type Logger } from '../obs/logger';
 import {
+  corpoDaMensagem,
   getLeadContext,
+  type CorpoDaMensagemRow,
   type LeadContext,
   type LeadContextMessage,
   type LeadContextResult,
@@ -336,6 +339,19 @@ export const AGENT_TOOL_DEFS = {
         title: z.string().describe('título curto, ex.: "Liberar acesso ao painel"'),
         summary: z.string().describe('o que o lead precisa, em pt-br'),
         blocker: z.string().describe('por que você não consegue resolver sozinho'),
+        // O assunto serve para quem TRIA a fila separar antes de ler. O detalhe
+        // continua no título e no resumo — este campo não os substitui, e por
+        // isso a lista é curta: muitas opções produzem classificação
+        // inconsistente, e aí o filtro atrapalha em vez de ajudar.
+        kind: z
+          .enum(Object.keys(TIPOS_DE_CASO) as [string, ...string[]])
+          .describe(
+            'do que o caso trata, para a equipe triar: ' +
+              Object.entries(TIPOS_DE_CASO_PARA_A_IA)
+                .map(([k, o]) => `${k} (${o})`)
+                .join('; ') +
+              '. Na dúvida entre dois, escolha o que descreve o PEDIDO, não o obstáculo.',
+          ),
       })
       .passthrough(),
   },
@@ -436,6 +452,17 @@ const inboundTurnPayloadSchema = z
  * entrar entre o despacho e o turno, e o agente passa a responder ao registro
  * errado. A resposta deve sempre usar esta linha canônica.
  *
+ * ⚠️ Ela é COMPOSTA pelo mesmo caminho do histórico (`corpoDaMensagem`), nunca
+ * pela coluna `body` crua. Áudio e foto chegam do WhatsApp sem legenda — `body`
+ * NULL e o conteúdo no derivado (transcrição/visão, gravado DEPOIS pelo
+ * `workers/media-derive-worker.ts`: é essa a corrida que se mede aqui) ou no
+ * marcador `[tipo]`. Lida crua, a linha canônica valia `''` enquanto o histórico
+ * logo abaixo mostrava o texto do cliente — e os DOIS lados do defeito saem
+ * daqui: a abertura anunciava "não há texto utilizável" sobre uma mensagem que
+ * tem texto, e a barreira do falso-vazio desarmava, porque
+ * `claimsCurrentInboundIsEmpty` devolve `false` quando o texto canônico é `''`.
+ * (issue #617)
+ *
  * Exportada só para o teste: o recorte (org + conversa + id + `direction`) é o
  * que impede um id de outra conversa — ou uma outbound — de virar "a mensagem
  * atual", e um recorte não se prova lendo a chamada.
@@ -444,8 +471,8 @@ export async function loadInboundBodyForJob(
   db: Queryable,
   input: { tenantId: string; conversationId: string; inboundMessageId: string },
 ): Promise<string | null> {
-  const result = await db.query<{ body: string | null }>(
-    `select body
+  const result = await db.query<CorpoDaMensagemRow>(
+    `select type, body, media_url, media_storage_path, media_derived_text
        from messages
       where organization_id = $1
         and conversation_id = $2
@@ -455,7 +482,7 @@ export async function loadInboundBodyForJob(
     [input.tenantId, input.conversationId, input.inboundMessageId],
   );
   const row = result.rows[0];
-  return row === undefined ? null : (row.body ?? '');
+  return row === undefined ? null : corpoDaMensagem(row);
 }
 
 /** Conteúdo do checkpoint — o modelo devolve, o Zod valida, o Postgres guarda. */
@@ -780,6 +807,13 @@ const AGENDA_SYSTEM_BLOCK =
   'crm_book_appointment (ou crm_reschedule_appointment, para remarcação) e ver o retorno confirmando o ' +
   'sucesso. Isso vale mesmo quando o lead já aceitou um horário que você ofereceu — aceite verbal não é ' +
   'reserva. NUNCA diga "confirmado", "está marcado" ou equivalente baseado só no histórico da conversa. ' +
+  // ⚠️ A ressalva é obrigatória: sem ela este parágrafo ENSINA o erro. Num tipo
+  // que exige aprovação, marcar devolve `aguarda_confirmacao: true` e o
+  // compromisso nasce `pending` — dizer "confirmado" ali é afirmar o que
+  // ninguém aprovou, e o cliente aparece num horário que pode ser recusado.
+  '⚠️ EXCEÇÃO: se o retorno trouxer `aguarda_confirmacao: true`, o horário foi apenas RESERVADO e ' +
+  'ainda depende de alguém da equipe aprovar. Nesse caso NÃO diga que está confirmado: diga que ' +
+  'separou o horário e que a equipe confirma. ' +
   'Se ainda não chamou a ferramenta neste turno, chame antes de responder; se a chamada falhar ou você não ' +
   'tiver certeza do resultado, diga que vai verificar e NÃO afirme que está confirmado.\n' +
   'Isso NÃO é desculpa para procrastinar: se o lead mencionou (agora ou em qualquer mensagem anterior da ' +
@@ -799,6 +833,41 @@ const AGENDA_SYSTEM_BLOCK =
   'chame primeiro, e só fale de encaminhar a alguém se a ferramenta genuinamente não resolver.';
 
 /**
+ * O mesmo ensino para quem CONSULTA a agenda e não marca.
+ *
+ * ⚠️ Este bloco existe porque o de cima nomeia `crm_book_appointment` em toda
+ * frase, e há um arranjo legítimo e comum em que essa ferramenta não é dada ao
+ * agente de propósito: o negócio quer que uma PESSOA confirme cada horário, e a
+ * IA só consulta e registra o pedido. Clínica, salão, consultório.
+ *
+ * Antes desta divisão, esse agente não recebia bloco nenhum — a condição era
+ * `toolIds.includes('crm_book_appointment')` — e ficava sem justamente a parte
+ * que lhe cabe: não prometer "vou verificar e te aviso" sem ter consultado. Dar
+ * a ele o bloco inteiro seria pior: ensinaria uma ferramenta que ele não tem, e
+ * o modelo tentaria chamá-la.
+ *
+ * O que muda de conteúdo é só o desfecho: lá a checagem termina em marcar, aqui
+ * termina em oferecer o horário e dizer, sem rodeio, que quem confirma é uma
+ * pessoa. Isso não é hesitação — é o desenho do negócio, e o texto diz isso para
+ * o modelo não confundir com incerteza dele.
+ */
+const AGENDA_CONSULTA_SYSTEM_BLOCK =
+  '## Agenda — consulte antes de falar de horário\n' +
+  'Se o lead mencionou (agora ou em qualquer mensagem anterior da conversa) um dia/horário ' +
+  'específico que ainda não foi checado, chame crm_find_free_slots NESTE turno antes de responder. ' +
+  'Não repita "vou verificar e te aviso" sem ter chamado a ferramenta — um "vou verificar" só é ' +
+  'aceitável na MESMA resposta em que você já chamou e ela falhou ou não trouxe resultado.\n' +
+  'Você NÃO tem ferramenta para marcar: quem confirma o horário é uma pessoa da equipe. Então ' +
+  'NUNCA diga "confirmado", "está marcado", "reservei" ou equivalente — nem depois de o lead ' +
+  'aceitar um horário que você ofereceu. Diga que vai passar para a equipe confirmar. Isso é como ' +
+  'o negócio funciona, não uma limitação a esconder nem uma incerteza sua.\n' +
+  'Consultar a agenda com crm_find_free_slots está SEMPRE dentro da sua autonomia — mesmo que as ' +
+  'instruções da empresa peçam para encaminhar decisões a um responsável nomeado. Aquilo vale para ' +
+  'OUTRAS decisões (desconto, exceção de política); nunca para simplesmente olhar quais horários ' +
+  'existem. Não use "vou confirmar com [nome]" como desculpa para não ter consultado: consulte ' +
+  'primeiro, e aí diga a quem passa.';
+
+/**
  * Tools de agenda cuja EXECUÇÃO neste turno arma o `agendaStallGate` (before-send.ts) —
  * ver o wrap no loop de montagem das tools MCP, mais abaixo.
  */
@@ -807,6 +876,18 @@ const AGENDA_TOOL_NAMES = new Set([
   'crm_book_appointment',
   'crm_reschedule_appointment',
 ]);
+
+/**
+ * O agente tem alguma ferramenta de agenda? É o que ARMA o `agendaStallGate`.
+ *
+ * Exportada porque o caminho de prévia (`preview.ts`) monta o mesmo contexto de
+ * gate por conta própria, e as duas condições precisam ser a MESMA: se a prévia
+ * armar diferente do turno real, quem afina o prompt testa contra um gate que não
+ * é o que vai rodar — e o defeito aparece só com cliente na frente.
+ */
+export function temFerramentaDeAgenda(toolIds: readonly string[]): boolean {
+  return toolIds.some((t) => AGENDA_TOOL_NAMES.has(t));
+}
 
 export interface InboundTurnKnobs {
   /** últimas N mensagens no contexto de abertura (LEAD_CONTEXT_HISTORY_LIMIT) */
@@ -1872,6 +1953,9 @@ async function executarTurnoDoAgente(
   if (agentConfig !== null && agentConfig.casesEnabled) blocosResidentes.push(CASES_SYSTEM_BLOCK);
   if (agentConfig !== null && agentConfig.toolIds.includes('crm_book_appointment')) {
     blocosResidentes.push(AGENDA_SYSTEM_BLOCK);
+  } else if (agentConfig !== null && agentConfig.toolIds.includes('crm_find_free_slots')) {
+    // Só consulta: o bloco de cima nomeia uma ferramenta que ele não tem.
+    blocosResidentes.push(AGENDA_CONSULTA_SYSTEM_BLOCK);
   }
   if (preview)
     blocosResidentes.push(
@@ -2613,11 +2697,13 @@ async function executarTurnoDoAgente(
             // idem (ver GateContext.internalVocabularyEnforced).
             enforceInternalVocabulary: true,
             // Mesmo padrão do vocabulário interno: só o `send_message` arma — é o único
-            // corpo escrito pelo modelo. `active` segue a MESMA condição de
-            // `AGENDA_SYSTEM_BLOCK` (crm_book_appointment publicado); sem ela o gate
-            // vetaria agente que nem tem a ferramenta de agenda.
+            // corpo escrito pelo modelo. `active` é ter QUALQUER ferramenta de agenda:
+            // um agente que só CONSULTA promete "vou verificar" igual, e enquanto a
+            // condição era só `crm_book_appointment` ele ficava sem o gate. Quem não tem
+            // ferramenta de agenda nenhuma segue desarmado — vetá-lo não teria cura.
             agenda: {
-              active: agentConfig !== null && agentConfig.toolIds.includes('crm_book_appointment'),
+              active: agentConfig !== null && temFerramentaDeAgenda(agentConfig.toolIds),
+              podeMarcar: agentConfig !== null && agentConfig.toolIds.includes('crm_book_appointment'),
               toolCalledThisTurn: agendaToolCalledThisTurn,
             },
             ...(deps.knobs.disclosureMode !== undefined
@@ -3373,7 +3459,13 @@ async function executarTurnoDoAgente(
             },
             () => pendingCitations,
             semanticClassifier,
-            () => ({ agenda: { active: previewContext.agenda?.active ?? false, toolCalledThisTurn: agendaToolCalledThisTurn } }),
+            () => ({
+              agenda: {
+                active: previewContext.agenda?.active ?? false,
+                podeMarcar: previewContext.agenda?.podeMarcar ?? false,
+                toolCalledThisTurn: agendaToolCalledThisTurn,
+              },
+            }),
           )
         : rawTools;
     const tools = wrapToolsWithBreaker(previewTools, {

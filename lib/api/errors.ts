@@ -44,12 +44,25 @@ export const ApiErrorCodes = {
   agenda_disponibilidade_invalida: "agenda_disponibilidade_invalida",
   agenda_ja_cancelado: "agenda_ja_cancelado",
   agenda_listagem_sem_recorte: "agenda_listagem_sem_recorte",
+  // Código PRÓPRIO, e não o `unprocessable_entity` genérico: quem recebe isto
+  // precisa saber que o `lead_id` mandado não é um negócio do funil (é quase
+  // sempre um id de CONTATO — ver #509/#540) e que a correção é trocar o
+  // parâmetro, não tratar como indisponibilidade.
+  //
+  // Quem recebe é a TELA da agenda: a rota só aceita sessão (`requireRole`), e
+  // nenhum Bearer a alcança — o proxy devolve 401 antes. Se um dia ela passar a
+  // aceitar token, este comentário ganha o integrador de volta.
+  agenda_listagem_alvo_nao_e_lead: "agenda_listagem_alvo_nao_e_lead",
 
   // 409 — conflito
   idempotency_conflict: "idempotency_conflict",
   state_conflict: "state_conflict",
   invalid_state: "invalid_state", // resposta a um agent_case que saiu de awaiting_human (spec 15 §7)
   tenant_already_exists: "tenant_already_exists",
+  // POST /api/v1/contacts com telefone já cadastrado na mesma organização
+  // (índice uniq_contacts_org_phone). O corpo traz `details.contact_id` para a
+  // tela oferecer o contato existente em vez de só mostrar que deu erro.
+  contact_exists: "contact_exists",
   duplicate_external_id: "duplicate_external_id",
   event_gone: "event_gone", // resend de run cujo event_log original foi apagado (on delete set null)
   no_actions_to_resend: "no_actions_to_resend", // resend de regra que não tem mais nenhuma ação de webhook — reenviar nada não é sucesso
@@ -57,6 +70,7 @@ export const ApiErrorCodes = {
   next_action_changed: "next_action_changed", // o agente reescreveu a proposta entre o render e o clique
   channel_archived: "channel_archived", // ação sobre canal que o usuário excluiu (a linha só sobrevive como âncora das FKs)
   knowledge_source_type_in_use: "knowledge_source_type_in_use", // já existe fonte ATIVA daquele tipo para o agente (índice ai_knowledge_sources_unique_per_agent)
+  voice_already_paired: "voice_already_paired", // POST /voice/sessions/pair com aparelho já vinculado — a saída é DELETE /voice/sessions, nunca re-parear por cima (ver a rota)
 
   // 422 — semântica
   unprocessable_entity: "unprocessable_entity",
@@ -121,6 +135,7 @@ export const ApiErrorCodes = {
   unavailable: "unavailable", // 503: dependência de config ausente (ex.: pool do engine sem SUPABASE_DB_URL)
   waha_error: "waha_error",
   wacalls_error: "wacalls_error", // 502: o serviço de chamada de voz recusou ou não respondeu
+  wacalls_not_connected: "wacalls_not_connected", // 503 + Retry-After: sessão pareada cujo socket com o WhatsApp caiu por um instante (ver `wacallsSemConexao`)
   ai_provider_error: "ai_provider_error",
   nuvemshop_error: "nuvemshop_error",
 } as const;

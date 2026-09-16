@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { comandosDaFila } from "@/lib/inbox/comando-da-conversa";
+import { buscaValeConsulta } from "@/lib/inbox/termo-de-busca";
 import { useAutomaticoAtivo } from "@/hooks/ai/useAutomaticoAtivo";
 
 /**
@@ -143,6 +144,12 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
     [tab, searchParams, router, pathname],
   );
 
+  // Desliga só os AUXILIARES e mantém a aba: a aba é onde a pessoa está, e
+  // limpá-la junto a tiraria do lugar sem ela ter pedido.
+  const limparFiltrosAuxiliares = useCallback(() => {
+    setFilterValue({ tab, search: "", onlyUnread: false });
+  }, [tab, setFilterValue]);
+
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [visibleIds, setVisibleIds] = useState<string[]>([]);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -172,9 +179,16 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
   const filters: ConversationsFilters = useMemo(
     () => ({
       ...tabToFilter(filterValue.tab, automaticoDaOrg),
-      search: filterValue.search || undefined,
+      // A tela NÃO pede o que a rota recusa: o hook trata falha com
+      // `showApiError`, então digitar a primeira letra de qualquer busca faria
+      // piscar um erro na cara de quem digita. A regra é a MESMA que o schema
+      // usa (`lib/inbox/termo-de-busca.ts`) — nunca repetida aqui.
+      search: buscaValeConsulta(filterValue.search)
+        ? filterValue.search
+        : undefined,
       channel_session_id: filterValue.channel_session_id,
       tag: filterValue.tag,
+      unread: filterValue.onlyUnread || undefined,
     }),
     [
       filterValue.tab,
@@ -182,16 +196,10 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
       filterValue.search,
       filterValue.channel_session_id,
       filterValue.tag,
+      filterValue.onlyUnread,
     ],
   );
 
-  const clientFilter = useMemo(
-    () =>
-      filterValue.onlyUnread
-        ? (c: ConversationWithContact) => (c.unread_count_for_assignee ?? 0) > 0
-        : undefined,
-    [filterValue.onlyUnread],
-  );
 
   // We need the selected conversation object for header / composer / side panel.
   // Source it from the same query the list uses to avoid an extra request.
@@ -407,8 +415,8 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
             filters={filters}
             selectedId={selectedId}
             onSelect={handleSelect}
-            clientFilter={clientFilter}
             onVisibleChange={handleVisibleChange}
+            onLimparFiltros={limparFiltrosAuxiliares}
           />
         </div>
       </div>

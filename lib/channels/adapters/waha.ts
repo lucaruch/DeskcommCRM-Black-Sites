@@ -11,6 +11,7 @@ import { getWahaClient } from "@/lib/waha/client";
 import { wahaSendPlanFor } from "@/lib/waha/media-send";
 import {
   resolveCanonicalCusChatId,
+  resolvePhoneJidDigitsForCall,
   resolveWhatsappIdForContactCard,
 } from "@/lib/waha/resolve-contact-whatsapp-id";
 import { bareWaMessageId, parseWahaMessageId } from "@/lib/waha/message-id";
@@ -103,6 +104,16 @@ export const wahaAdapter: ChannelAdapter = {
     const client = getWahaClient();
     if (!client) return null;
     return client.resolvePhoneForLid(input.sessionRef, input.identity.slice("lid:".length));
+  },
+
+  /**
+   * `check-exists` nas duas grafias do nono dígito; só JID de telefone serve
+   * (ver `phoneJidDigitsFromCheckResult`). Transporte não configurado é `null`.
+   */
+  async resolveRegisteredPhone(input: { sessionRef: string; phone: string }): Promise<string | null> {
+    const client = getWahaClient();
+    if (!client) return null;
+    return resolvePhoneJidDigitsForCall(client, input.sessionRef, input.phone);
   },
 
   /**

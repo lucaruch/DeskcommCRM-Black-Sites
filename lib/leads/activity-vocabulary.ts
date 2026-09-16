@@ -122,6 +122,14 @@ export type ActivityType =
    */
   | "voice_call_missed"
   /**
+   * Ligação FEITA pelo CRM que ninguém atendeu. Não é "perdida": quem discou
+   * sabe que ninguém pegou, e o rótulo da linha do tempo sai do TIPO — gravar
+   * `voice_call_missed` aqui escrevia "Chamada de voz perdida" no negócio de
+   * quem acabou de ligar. Fora da lista positiva de `fn_update_last_activity_at`
+   * pelo mesmo motivo de `voice_call_missed`: ninguém falou com ninguém.
+   */
+  | "voice_call_unanswered"
+  /**
    * A TAREFA COMBINADA, na linha do tempo do negócio (migration 0210).
    *
    * "Ligar de volta na terça" só existe por causa de um negócio. Sem estas duas
@@ -241,6 +249,7 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   conversation_ai_paused: "Pausou o automático",
   voice_call: "Chamada de voz",
   voice_call_missed: "Chamada de voz perdida",
+  voice_call_unanswered: "Chamada de voz sem resposta",
   task_created: "Tarefa combinada",
   task_completed: "Tarefa concluída",
   // Rótulo com OBJETO e sem jargão de banco: "Mesclado" sozinho é palavra de

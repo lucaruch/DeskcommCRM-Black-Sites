@@ -41,6 +41,7 @@ import { PROVEDORES } from "@/lib/ai/pontos/provedores";
 import { ModelPicker, useModelMeta } from "./ModelPicker";
 import { CHAVE_DA_INSTALACAO, CredentialPicker, STATUS_LABEL, findCredential } from "./CredentialPicker";
 import { rotuloDoEstadoDoCanal } from "@/lib/channels/estado";
+import { bloqueioDePublicacao } from "@/lib/ai/agents/bloqueio-de-publicacao";
 import { ToolPicker } from "./ToolPicker";
 import { TriggerEditor, type TriggerValue } from "./TriggerEditor";
 import { HandoffKeywordsInput } from "./HandoffKeywordsInput";
@@ -254,9 +255,12 @@ function toVersionPayload(s: FormState) {
     model: s.model,
     // O token é da TELA; o contrato da versão é `null` = chave da instalação.
     credential_id: s.credential_id === CHAVE_DA_INSTALACAO ? null : s.credential_id,
+    // "" na tela é "ainda não escolhi o número", e no contrato da versão isso é
+    // `null`. Sem a tradução, o Zod recusaria a string vazia e o rascunho de
+    // quem ainda não conectou o WhatsApp não salvaria — o defeito de origem.
+    channel_session_id: s.channel_session_id === "" ? null : s.channel_session_id,
     tool_ids: s.tool_ids,
     trigger_config: s.trigger_config,
-    channel_session_id: s.channel_session_id,
     max_steps: s.max_steps,
     token_budget: s.token_budget,
     cost_budget_cents: s.cost_budget_cents,
@@ -361,8 +365,17 @@ export function AgentForm(props: Props) {
       !(props.provedoresDaInstalacao ?? []).includes(form.provider)
     )
       errors.credential_id = `${t("Esta instalação não tem chave de")} ${form.provider}. ${t("Escolha outra empresa de IA ou cadastre uma chave.")}`;
-    if (!form.channel_session_id)
-      errors.channel_session_id = t("Escolha por qual número de WhatsApp ele atende.");
+    // ⚠️ O NÚMERO NÃO ENTRA AQUI — de propósito, e não por esquecimento.
+    //
+    // Esta lista é o que impede de SALVAR. Exigir o número aqui travava o
+    // rascunho de toda instalação fresca: sem WhatsApp pareado não existe uma
+    // linha em `channel_sessions`, o seletor abria vazio, e o dono que acabou de
+    // escrever o prompt do atendente não conseguia guardá-lo — tinha de escolher
+    // de uma lista sem opção. Escrever quem o agente é e conectar o aparelho são
+    // dois dias diferentes na vida de quem instala.
+    //
+    // Quem cobra o número é `bloqueioDePublicacao` (logo abaixo): sem ele o
+    // agente não vai ao ar, e o botão "Publicar" explica o que falta.
     if (form.tool_ids.length > TETO_TOOLS_POR_AGENTE)
       errors.tool_ids = `${t("Máximo de")} ${TETO_TOOLS_POR_AGENTE} ${t("capacidades por agente.")}`;
 
@@ -380,19 +393,54 @@ export function AgentForm(props: Props) {
 
   const isValid = Object.keys(validation).length === 0;
 
+  /**
+   * A dica do botão "Publicar" — uma frase, vinda de UM motivo.
+   *
+   * A régua é `lib/ai/agents/bloqueio-de-publicacao.ts`, e ela saiu daqui porque
+   * aqui ela estava errada para o caso mais comum do produto: perguntava por uma
+   * LINHA de credencial (`cred`), e "a chave desta instalação" não é uma linha —
+   * é `credential_id: null`. Quem instalou pelo kit e nunca abriu a tela de
+   * Credenciais via o botão desabilitado para sempre, pedindo para escolher a
+   * chave que tinha acabado de escolher.
+   */
   const publishBlockReason = React.useMemo(() => {
     if (!isEdit) return t("Salve o agent antes de publicar.");
-    if (!props.draft) return t("Sem rascunho para publicar.");
-    if (!isValid) return t("Resolva os erros do formulário.");
-    if (dirty) return t("Salve o rascunho antes de publicar.");
-    if (!cred) return t("Escolha a chave de acesso da empresa de inteligência artificial.");
-    if (credSt !== "validated")
-      return `${t("Credencial")} ${form.provider} ${credSt === "invalid" ? t("inválida") : t("ainda não validada")}.`;
-    if (!channelSession) return t("Escolha por qual número de WhatsApp ele atende.");
-    if (channelSession.status !== "working" && channelSession.status !== "WORKING")
-      return `${t("Número WhatsApp não está conectado (status:")} ${channelSession.status}).`;
-    return null;
-  }, [isEdit, props, isValid, dirty, cred, credSt, form.provider, channelSession, t]);
+    const motivo = bloqueioDePublicacao({
+      temRascunhoVigente: !!props.draft,
+      formularioValido: isValid,
+      alteracoesNaoSalvas: dirty,
+      provedor: form.provider,
+      chave: {
+        daInstalacao: form.credential_id === CHAVE_DA_INSTALACAO,
+        instalacaoTemChaveDoProvedor: (props.provedoresDaInstalacao ?? []).includes(
+          form.provider,
+        ),
+        estadoDaCredencialDaOrg: credSt,
+      },
+      numero: { estado: channelSession?.status ?? null },
+    });
+    if (!motivo) return null;
+    switch (motivo.codigo) {
+      case "sem_rascunho":
+        return t("Sem rascunho para publicar.");
+      case "formulario_invalido":
+        return t("Resolva os erros do formulário.");
+      case "alteracoes_nao_salvas":
+        return t("Salve o rascunho antes de publicar.");
+      case "instalacao_sem_chave_do_provedor":
+        return `${t("Esta instalação não tem chave de")} ${motivo.provedor}. ${t("Escolha outra empresa de IA ou cadastre uma chave.")}`;
+      case "sem_chave":
+        return t("Escolha a chave de acesso da empresa de inteligência artificial.");
+      case "chave_nao_utilizavel":
+        return `${t("Credencial")} ${motivo.provedor} ${motivo.estado === "invalid" ? t("inválida") : t("ainda não validada")}.`;
+      case "sem_numero":
+        return t(
+          "Escolha por qual número de WhatsApp ele atende. O rascunho está salvo; conecte um número em Conexões e volte aqui para publicar.",
+        );
+      case "numero_desconectado":
+        return `${t("Número WhatsApp não está conectado (status:")} ${motivo.estado}).`;
+    }
+  }, [isEdit, props, isValid, dirty, credSt, form.provider, form.credential_id, channelSession, t]);
 
   // ---------------------------------------------------------------------
   // Handlers
@@ -801,8 +849,29 @@ export function AgentForm(props: Props) {
                   ) : null}
                 </SelectContent>
               </Select>
-              {validation.channel_session_id ? (
-                <p className="text-xs text-destructive">{validation.channel_session_id}</p>
+              {/*
+                NÃO é erro: é o estado normal de quem ainda não pareou o aparelho.
+                Antes, esta linha era vermelha e vinha de `validation`, que também
+                travava o botão de salvar — o dono de uma instalação nova escrevia
+                o prompt inteiro e não conseguia guardar nada.
+              */}
+              {!form.channel_session_id ? (
+                <p className="text-xs text-muted-foreground">
+                  {props.channelSessions.length === 0 ? (
+                    <>
+                      {t("Nenhum número conectado ainda — o rascunho salva sem ele.")}{" "}
+                      <Link
+                        href="/app/connections"
+                        className="font-medium text-foreground underline underline-offset-4"
+                      >
+                        {t("Conectar WhatsApp")}
+                      </Link>{" "}
+                      {t("para poder publicar.")}
+                    </>
+                  ) : (
+                    t("Escolha o número para poder publicar. Sem ele, o rascunho salva mas não atende.")
+                  )}
+                </p>
               ) : null}
             </div>
           </Card>

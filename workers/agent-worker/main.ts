@@ -350,14 +350,18 @@ export async function startWorker(
   // org. Sem a env, fica OFF: instalação que não usa a feature não paga o
   // custo de uma conexão SSE tentando alcançar um serviço que não existe.
   const voiceCallsBridgeLoop =
-    env.WACALLS_API_BASE_URL !== undefined
+    env.WACALLS_API_BASE_URL !== undefined && env.WACALLS_API_TOKEN !== undefined
       ? runVoiceCallsBridgeLoop(
           pool,
-          { baseUrl: env.WACALLS_API_BASE_URL, maxBackoffMs: env.WACALLS_BRIDGE_MAX_BACKOFF_MS },
+          {
+            baseUrl: env.WACALLS_API_BASE_URL,
+            apiToken: env.WACALLS_API_TOKEN,
+            maxBackoffMs: env.WACALLS_BRIDGE_MAX_BACKOFF_MS,
+          },
           log,
           loopsAbort.signal,
         )
-      : (log.info('ponte WaCalls OFF — WACALLS_API_BASE_URL ausente no env', {}), Promise.resolve());
+      : (log.info('ponte WaCalls OFF — endereço ou credencial ausente no env', {}), Promise.resolve());
 
   // Circuito de saúde do número (block/response rate → hold).
   const healthLoop = runHealthLoop(

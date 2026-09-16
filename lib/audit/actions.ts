@@ -60,6 +60,7 @@ export const AUDIT_ACTIONS = [
   "contact.anonymized",
   "contact.merge_pending",
   "contact.merged",
+  "contact.aniversario_emitido",
   "lgpd.anonymize_executed",
   // A cascata retomando o que uma execução interrompida não terminou (#310).
   "lgpd.anonymize_catchup",
@@ -210,6 +211,13 @@ export const AUDIT_ACTIONS = [
   "channel.reactivated",
   // Chamada de voz WhatsApp (WaCalls, spec 18) — pareamento do segundo
   // dispositivo vinculado, opt-in por org. Admin only.
+  //
+  // `voice.session_prepared` NÃO é mais emitida: era o passo "preparar" que
+  // antecedia o `/pair` do upstream, e o `/pair` foi embora (ver
+  // `app/api/v1/voice/sessions/pair/route.ts`). Fica na lista porque a trilha
+  // de quem pareou entre 2026-09-14 e a remoção tem linhas com esse nome, e o
+  // painel rotula a partir daqui.
+  "voice.session_prepared",
   "voice.session_pair_started",
   // As mutações da chamada em si. Todas auditadas porque todas têm efeito no
   // mundo: uma ligação sai do CRM para o telefone de uma pessoa, alguém a
@@ -323,7 +331,24 @@ export const AUDIT_ACTIONS = [
   // veem, e a pergunta "quem repintou isto?" só tem resposta aqui: não há
   // event_log (nenhum handler consumiria o tipo — ver register-handlers.ts).
   "platform_branding.updated",
+  // A política de cadastro da INSTALAÇÃO trocada em `platform_settings`
+  // (migration 0233) — mutação de plataforma, sem `organization_id`. Auditável
+  // porque decide quem consegue ENTRAR no sistema inteiro, e "por que ninguém
+  // mais cria conta?" só tem resposta aqui: não há event_log que cubra o tipo
+  // (nenhum handler o consumiria — ver register-handlers.ts) e a troca não
+  // deixa rastro em nenhuma outra tabela.
+  "platform.signup_mode_updated",
   "platform_google_oauth.updated",
+  // A credencial do APP da Meta da INSTALAÇÃO (migration 0257): o App Secret que
+  // assina a entrega do webhook e o verify token que responde ao handshake.
+  // Auditável pelo mesmo motivo da linha acima, e com alcance maior — quem tem o
+  // App Secret assina uma entrega de webhook VÁLIDA com dados que ele inventar,
+  // movendo contato e lead no funil de QUALQUER cliente daquela instalação.
+  // Sem `organization_id`: não é credencial de tenant. `"platform_meta_app.
+  // verify_token_rotated"` é uma ação separada porque a rotação derruba a
+  // verificação de URL que estava valendo até alguém colar o valor novo na Meta.
+  "platform_meta_app.updated",
+  "platform_meta_app.verify_token_rotated",
   // A conexão da ORGANIZAÇÃO com a conta de anúncios (migration 0213).
   // Auditável porque o token gravado aqui escreve conversões na conta de
   // mídia do cliente: "quem apontou minhas vendas para este destino?" só tem
@@ -432,10 +457,30 @@ export const AUDIT_ACTIONS = [
   "agenda.tipo_criado",
   "agenda.tipo_alterado",
   "agenda.tipo_desativado",
+  // Ligar de volta um tipo que alguém desligou é ato de gestão e tem verbo
+  // próprio: como `agenda.tipo_alterado { campos: ["is_active"] }` ele seria,
+  // na trilha, indistinguível de "mudaram a duração".
+  "agenda.tipo_reativado",
   // A rodada que AVISOU alguém do próprio compromisso. Mensagem que saiu para o
   // telefone de um cliente é efeito, e efeito audita — mas só a rodada que
   // enviou: a que varreu e não achou ninguém a avisar não é mutação.
   "agenda.lembrete_enviado",
+  // Fechar ou abrir um dia muda quem consegue marcar, e a pergunta que aparece
+  // depois é sempre "quem fechou esse dia?". O bloqueio em si pode ser apagado
+  // (é regra vigente, não fato histórico); estas linhas é que guardam a autoria.
+  "agenda.dia_bloqueado",
+  "agenda.dia_aberto",
+  "agenda.bloqueio_removido",
+  // A cobrança de um caso parado. Audita a RODADA que avisou, não cada caso:
+  // o que se quer responder depois é "o sistema cobrou?", e uma linha por caso
+  // faria do audit log a própria fila.
+  "ai.caso_parado_cobrado",
+  // Um pedido não confirmado soltou o horário que estava segurando. Audita
+  // porque é CANCELAMENTO — o compromisso deixa de existir para quem o pediu —,
+  // e sem esta linha a única explicação para o horário ter voltado a aparecer
+  // seria "sumiu". Só a rodada que expirou alguma coisa; varredura vazia não é
+  // mutação.
+  "agenda.pendente_expirado",
   // A rodada de renovação — e ela só audita quando FEZ algo, como manda a regra
   // do cron desta base. Uma linha por rodada com efeito, carregando a contagem:
   // é o que permite responder "quantas agendas precisaram reconectar esta
@@ -494,6 +539,23 @@ export const AUDIT_ACTIONS = [
   // um bloqueio não há como saber nem uma coisa nem outra.
   "voice.opt_in_changed",
   "voice.session_unpaired",
+
+  // A exclusão de contato que NÃO completou (issue #752). A ausência de
+  // `contact.deleted` não distinguia "ninguém excluiu" de "tentei, um vínculo
+  // RESTRICT barrou e o contato ficou de pé" — e as duas coisas contam a mesma
+  // história incompleta quando a única linha que o painel tem para olhar é a do
+  // sucesso. `metadata.motivo` separa `vinculo_restrict` de `falha_ao_apagar` e
+  // `metadata.apagados` diz o que já tinha saído quando parou — que é
+  // exatamente o que faltou no incidente: o histórico foi destruído ANTES do
+  // erro, sem rastro de nada.
+  "contact.delete_blocked",
+  // Visão de plataforma sobre o agente de um cliente (fase A da spec 19). Entra
+  // porque toda leitura de `admin/` é auditada neste repo — e porque aqui o
+  // operador enxerga o agente publicado na organização de outra pessoa.
+  "platform_admin.tenant_agents_viewed",
+  // "Cliente pela agenda" ligada ou desligada (migration 0262). Ligar reescreve
+  // etiquetas de toda a organização; metadata leva as contagens.
+  "crm.cliente_pela_agenda_alterado",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
