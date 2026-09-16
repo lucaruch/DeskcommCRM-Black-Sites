@@ -56,6 +56,8 @@ const SCOPES: { id: string; label: string }[] = [
   { id: "messages:read", label: "Ler mensagens" },
   { id: "messages:write", label: "Enviar mensagens" },
   { id: "audit:read", label: "Ler o log de auditoria" },
+  { id: "prospecting:read", label: "Consultar execuções de prospecção" },
+  { id: "prospecting:write", label: "Importar prospects para a prospecção" },
 ];
 
 export function ApiTokensClient() {
