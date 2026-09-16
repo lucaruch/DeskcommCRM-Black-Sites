@@ -57,8 +57,32 @@ type Recipient = {
 type Detail = {
   campaign: Campaign;
   metrics: Record<string, number>;
+  health: {
+    attempted: number;
+    failed: number;
+    blocked: number;
+    not_interested: number;
+    opted_out: number;
+    response_rate: number;
+    opt_out_rate: number;
+    circuit_breaker_open: boolean;
+  };
   recipients: Recipient[];
   events: Array<{ id: string; type: string; created_at: string }>;
+};
+type Run = {
+  run_id: string;
+  source: string;
+  received_at: string;
+  prospects_received: number;
+  prospects_created: number;
+  duplicates: number;
+  rejected: number;
+  eligible: number;
+  queued: number;
+  awaiting_consent: number;
+  dry_run: boolean;
+  status: string;
 };
 type Tone = "success" | "warning" | "error" | "neutral";
 
@@ -82,9 +106,14 @@ const statusLabel: Record<string, string> = {
   processing: "Enviando",
   sent: "Enviada",
   replied: "Respondeu",
+  awaiting_consent: "Aguardando consentimento",
+  waiting_connection: "Aguardando conexão",
+  not_interested: "Sem interesse",
+  rejected: "Rejeitado",
   blocked: "Bloqueada",
   skipped: "Ignorada",
   failed: "Falhou",
+  dry_run: "Teste",
 };
 function tone(status: string): Tone {
   if (["active", "sent", "replied"].includes(status)) return "success";
@@ -97,6 +126,7 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [runs, setRuns] = useState<Run[]>([]);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [stages, setStages] = useState<Stage[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -117,8 +147,12 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
   async function refresh() {
     try {
       setError(null);
-      const rows = await api<Campaign[]>("/api/v1/campaigns");
+      const [rows, recentRuns] = await Promise.all([
+        api<Campaign[]>("/api/v1/campaigns"),
+        api<Run[]>("/api/v1/prospecting/runs?limit=8"),
+      ]);
       setCampaigns(rows);
+      setRuns(recentRuns);
       if (!selected && rows[0]) setSelected(rows[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao carregar disparos.");
@@ -137,7 +171,7 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
       api<Pipeline[]>("/api/v1/pipelines").then(setPipelines),
       api<Channel[]>("/api/v1/channel-sessions").then(setChannels),
     ]).catch(() => undefined);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
     if (selected) void loadDetail(selected);
@@ -261,11 +295,19 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
           {error}
         </div>
       )}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-text-muted">Leads recebidos</p>
             <p className="mt-1 text-2xl font-semibold">{totals.total}</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="p-4">
+            <p className="text-xs text-text-muted">Aguardando consentimento</p>
+            <p className="mt-1 text-2xl font-semibold">
+              {runs.reduce((sum, run) => sum + run.awaiting_consent, 0)}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -338,8 +380,11 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
                 <div>
                   <CardTitle>{detail.campaign.name}</CardTitle>
                   <CardDescription className="mt-1">
-                    {String(detail.campaign.settings?.timezone ?? "America/Sao_Paulo")} · limite de{" "}
-                    {String(detail.campaign.settings?.daily_limit ?? 20)}/dia
+                    {String(detail.campaign.settings?.timezone ?? "America/Sao_Paulo")} ·{" "}
+                    {String(detail.campaign.settings?.window_start ?? "09:30")}–
+                    {String(detail.campaign.settings?.window_end ?? "17:30")} ·{" "}
+                    {String(detail.campaign.settings?.daily_limit ?? 15)}/dia · score mínimo{" "}
+                    {String(detail.campaign.settings?.minimum_score ?? 70)}
                   </CardDescription>
                 </div>
                 <div className="flex gap-2">
@@ -380,12 +425,38 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
                 </div>
               </CardHeader>
               <CardContent className="space-y-5">
+                {detail.health.circuit_breaker_open && (
+                  <div className="rounded-md border border-error bg-error-bg px-3 py-2 text-sm text-error-fg">
+                    Circuit breaker ativo: a campanha está pausada para proteger a reputação do
+                    canal.
+                  </div>
+                )}
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(detail.metrics).map(([key, value]) => (
                     <Badge key={key} variant={tone(key)}>
                       {statusLabel[key] ?? key}: {value}
                     </Badge>
                   ))}
+                </div>
+                <div className="grid gap-3 sm:grid-cols-4">
+                  <div className="rounded-md border px-3 py-2">
+                    <p className="text-xs text-text-muted">Taxa de resposta</p>
+                    <p className="mt-1 font-semibold">
+                      {(detail.health.response_rate * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <p className="text-xs text-text-muted">Sem interesse</p>
+                    <p className="mt-1 font-semibold">{detail.health.not_interested}</p>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <p className="text-xs text-text-muted">Opt-outs</p>
+                    <p className="mt-1 font-semibold">{detail.health.opted_out}</p>
+                  </div>
+                  <div className="rounded-md border px-3 py-2">
+                    <p className="text-xs text-text-muted">Falhas</p>
+                    <p className="mt-1 font-semibold">{detail.health.failed}</p>
+                  </div>
                 </div>
                 <div className="overflow-x-auto rounded-md border">
                   <table className="w-full text-left text-sm">
@@ -431,6 +502,46 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
           )}
         </Card>
       </div>
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle>Execuções recentes</CardTitle>
+          <CardDescription>Histórico dos lotes recebidos pelo Action do ChatGPT.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {runs.length === 0 ? (
+            <p className="py-4 text-sm text-text-muted">Nenhuma execução registrada.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-surface-elevated text-xs text-text-muted">
+                  <tr>
+                    <th className="px-3 py-2">Execução</th>
+                    <th className="px-3 py-2">Recebidos</th>
+                    <th className="px-3 py-2">Elegíveis</th>
+                    <th className="px-3 py-2">Fila</th>
+                    <th className="px-3 py-2">Consentimento</th>
+                    <th className="px-3 py-2">Data</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {runs.map((run) => (
+                    <tr key={run.run_id} className="border-t">
+                      <td className="px-3 py-2 font-medium">{run.run_id}</td>
+                      <td className="px-3 py-2">{run.prospects_received}</td>
+                      <td className="px-3 py-2">{run.eligible}</td>
+                      <td className="px-3 py-2">{run.queued}</td>
+                      <td className="px-3 py-2">{run.awaiting_consent}</td>
+                      <td className="px-3 py-2 text-xs text-text-muted">
+                        {new Date(run.received_at).toLocaleString("pt-BR")}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
       {newOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <Card className="w-full max-w-xl">

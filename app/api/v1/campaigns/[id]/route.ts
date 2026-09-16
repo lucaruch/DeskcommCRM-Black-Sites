@@ -69,10 +69,28 @@ export async function GET(
     all[row.status] = (all[row.status] ?? 0) + 1;
     return all;
   }, {});
+  const attempted = ["sent", "delivered", "read", "replied"].reduce(
+    (sum, status) => sum + (metrics[status] ?? 0),
+    0,
+  );
+  const replied = metrics.replied ?? 0;
+  const health = {
+    attempted,
+    failed: metrics.failed ?? 0,
+    blocked: metrics.blocked ?? 0,
+    not_interested: metrics.not_interested ?? 0,
+    opted_out: metrics.opted_out ?? 0,
+    response_rate: attempted ? Number((replied / attempted).toFixed(4)) : 0,
+    opt_out_rate: attempted ? Number(((metrics.opted_out ?? 0) / attempted).toFixed(4)) : 0,
+    circuit_breaker_open: Boolean(
+      (result.data.settings as Record<string, unknown> | null)?.circuit_breaker_open,
+    ),
+  };
   return ok(
     {
       campaign: result.data,
       metrics,
+      health,
       recipients: recipients.data ?? [],
       events: events.data ?? [],
     },

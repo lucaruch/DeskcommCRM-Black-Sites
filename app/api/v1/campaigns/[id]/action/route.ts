@@ -8,21 +8,83 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 const action = z.enum(["start", "pause", "resume", "complete", "archive"]);
-export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }): Promise<Response> {
-  const requestId = randomUUID(); const authz = await requireRole("manager", { requestId, resource: "prospecting_campaigns" });
+export async function POST(
+  req: NextRequest,
+  context: { params: Promise<{ id: string }> },
+): Promise<Response> {
+  const requestId = randomUUID();
+  const authz = await requireRole("manager", { requestId, resource: "prospecting_campaigns" });
   if (!authz.ok) return authz.response;
-  const id = z.uuid().safeParse((await context.params).id); if (!id.success) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
-  let requested: z.infer<typeof action>; try { requested = action.parse((await req.json()).action); } catch { return fail("validation_failed", "Acao invalida.", 422, { requestId }); }
-  const db = createAdminClient(); const current = await db.from("prospecting_campaigns").select("status,channel_session_id").eq("organization_id", authz.org.orgId).eq("id", id.data).maybeSingle();
-  if (current.error || !current.data) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
-  const next: Record<string,string> = { start: "active", resume: "active", pause: "paused", complete: "completed", archive: "archived" };
-  if (requested === "start" || requested === "resume") {
-    if (!current.data.channel_session_id) return fail("conflict", "Selecione uma conexao WhatsApp antes de iniciar.", 409, { requestId });
-    const channel = await db.from("channel_sessions").select("status").eq("organization_id", authz.org.orgId).eq("id", current.data.channel_session_id).maybeSingle();
-    if (channel.data?.status !== "WORKING") return fail("conflict", "A conexao WhatsApp precisa estar ativa.", 409, { requestId });
+  const id = z.uuid().safeParse((await context.params).id);
+  if (!id.success) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
+  let requested: z.infer<typeof action>;
+  try {
+    requested = action.parse((await req.json()).action);
+  } catch {
+    return fail("validation_failed", "Acao invalida.", 422, { requestId });
   }
-  const updated = await db.from("prospecting_campaigns").update({ status: next[requested], updated_at: new Date().toISOString() }).eq("organization_id", authz.org.orgId).eq("id", id.data).select("id,status").single();
+  const db = createAdminClient();
+  const current = await db
+    .from("prospecting_campaigns")
+    .select("status,channel_session_id,settings")
+    .eq("organization_id", authz.org.orgId)
+    .eq("id", id.data)
+    .maybeSingle();
+  if (current.error || !current.data)
+    return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
+  const next: Record<string, string> = {
+    start: "active",
+    resume: "active",
+    pause: "paused",
+    complete: "completed",
+    archive: "archived",
+  };
+  if (requested === "start" || requested === "resume") {
+    if (!current.data.channel_session_id)
+      return fail("conflict", "Selecione uma conexao WhatsApp antes de iniciar.", 409, {
+        requestId,
+      });
+    const channel = await db
+      .from("channel_sessions")
+      .select("status")
+      .eq("organization_id", authz.org.orgId)
+      .eq("id", current.data.channel_session_id)
+      .maybeSingle();
+    if (channel.data?.status !== "WORKING")
+      return fail("conflict", "A conexao WhatsApp precisa estar ativa.", 409, { requestId });
+  }
+  const updated = await db
+    .from("prospecting_campaigns")
+    .update({
+      status: next[requested],
+      ...(requested === "start" || requested === "resume"
+        ? {
+            settings: {
+              ...(current.data.settings as Record<string, unknown>),
+              circuit_breaker_open: false,
+              circuit_breaker_reason: null,
+            },
+          }
+        : {}),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("organization_id", authz.org.orgId)
+    .eq("id", id.data)
+    .select("id,status,settings")
+    .single();
   if (updated.error) return fail("internal_error", "Falha ao alterar estado.", 500, { requestId });
-  void audit({ action: `prospecting.campaign_${requested}`, actorUserId: authz.user.id, organizationId: authz.org.orgId, resourceType: "prospecting_campaign", resourceId: updated.data.id, requestId, metadata: { from: current.data.status, to: next[requested] } });
+  void audit({
+    action: `prospecting.campaign_${requested}`,
+    actorUserId: authz.user.id,
+    organizationId: authz.org.orgId,
+    resourceType: "prospecting_campaign",
+    resourceId: updated.data.id,
+    requestId,
+    metadata: {
+      from: current.data.status,
+      to: next[requested],
+      circuit_breaker_reset: requested === "start" || requested === "resume",
+    },
+  });
   return ok(updated.data, { requestId });
 }

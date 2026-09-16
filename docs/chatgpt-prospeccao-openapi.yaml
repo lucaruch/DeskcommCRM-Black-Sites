@@ -1,0 +1,152 @@
+openapi: 3.0.3
+info:
+  title: DeskcommCRM - Prospecção Black Sites
+  version: 1.0.0
+  description: Recebimento idempotente de prospects qualificados para a campanha diária da Black Sites.
+servers:
+  - url: https://crm.bksly.com.br
+security:
+  - deskcommBearer: []
+paths:
+  /api/v1/prospecting/leads:
+    post:
+      operationId: enviarProspectsDiarios
+      summary: Envia prospects qualificados para a fila de prospecção
+      description: Importa um lote sem disparar na hora. O CRM valida consentimento, score, supressão, duplicidade, cooldown e janela de envio.
+      security:
+        - deskcommBearer: []
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProspectBatch"
+      responses:
+        "200":
+          description: Execução idempotente processada
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProspectingResponse"
+        "401": { description: Token ausente ou inválido }
+        "409": { description: Chave de execução reutilizada com corpo diferente }
+        "422": { description: Dados inválidos }
+        "429": { description: Limite temporário; respeite Retry-After }
+  /api/v1/prospecting/runs/{run_id}:
+    get:
+      operationId: consultarExecucaoProspeccao
+      summary: Consulta uma execução diária
+      parameters:
+        - $ref: "#/components/parameters/RunId"
+      responses:
+        "200":
+          description: Execução e destinatários importados
+        "404": { description: Execução não encontrada }
+  /api/v1/prospecting/leads/{id}:
+    get:
+      operationId: consultarProspect
+      summary: Consulta um destinatário de prospecção
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Prospect consultado }
+        "404": { description: Prospect não encontrado }
+  /api/v1/campaigns/{id}:
+    get:
+      operationId: consultarCampanhaProspeccao
+      summary: Consulta a campanha e seus indicadores
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: Campanha, métricas e saúde }
+        "404": { description: Campanha não encontrada }
+components:
+  securitySchemes:
+    deskcommBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: dsk_token
+      description: Token criado no CRM com apenas prospecting:write e prospecting:read. Nunca cole um token real neste arquivo.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 200 }
+  schemas:
+    ProspectBatch:
+      type: object
+      required: [prospects, source, run_id, generated_at]
+      additionalProperties: false
+      properties:
+        source: { type: string, example: chatgpt_daily_prospecting }
+        run_id: { type: string, example: 2026-09-16T07:00:00-03:00 }
+        generated_at: { type: string, format: date-time }
+        campaign_id: { type: string, format: uuid }
+        dry_run: { type: boolean, default: false }
+        prospects:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items: { $ref: "#/components/schemas/Prospect" }
+    Prospect:
+      type: object
+      required: [empresa, telefone, score, whatsapp_opt_in, whatsapp_opt_in_source]
+      additionalProperties: false
+      properties:
+        empresa: { type: string }
+        telefone: { type: string, description: E.164 ou telefone brasileiro normalizado pelo CRM }
+        responsavel: { type: string }
+        email: { type: string }
+        site: { type: string }
+        cidade: { type: string }
+        estado: { type: string }
+        score: { type: integer, minimum: 0, maximum: 100, example: 82 }
+        oportunidade: { type: string }
+        motivo_abordagem: { type: string }
+        mensagem_sugerida: { type: string }
+        whatsapp_opt_in: { type: boolean, description: Deve ser true para envio automático }
+        whatsapp_opt_in_source:
+          type: string
+          enum:
+            [
+              website_form,
+              landing_page,
+              qr_code,
+              existing_customer,
+              manual_confirmed,
+              inbound_whatsapp,
+              other_verified,
+            ]
+        whatsapp_opt_in_at: { type: string, format: date-time }
+        external_id: { type: string }
+        metadata: { type: object, additionalProperties: true }
+    ProspectingResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            run_id: { type: string }
+            received: { type: integer }
+            created: { type: integer }
+            updated: { type: integer }
+            duplicates: { type: integer }
+            rejected: { type: integer }
+            eligible: { type: integer }
+            queued: { type: integer }
+            awaiting_consent: { type: integer }
+            results: { type: array, items: { type: object } }

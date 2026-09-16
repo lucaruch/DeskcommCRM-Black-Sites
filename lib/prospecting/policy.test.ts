@@ -16,6 +16,7 @@ const snapshot: SendSnapshot = {
   campaign_status: "active",
   channel_working: true,
   blocked: false,
+  suppressed: false,
   anonymized: false,
   opted_out: false,
   replied: false,
@@ -24,6 +25,9 @@ const snapshot: SendSnapshot = {
   valid_phone: true,
   valid_message: true,
   dry_run: false,
+  consent: true,
+  score: 100,
+  circuit_breaker_open: false,
   initial: true,
   new_contacts_today: 0,
   last_other_campaign_send: null,
@@ -78,14 +82,14 @@ describe("contrato de prospeccao", () => {
 describe("politica de envio no backend", () => {
   it("autoriza somente dentro da janela em Sao Paulo", () => {
     expect(withinCampaignWindow(settings, now)).toBe(true);
-    expect(withinCampaignWindow(settings, new Date("2026-09-16T11:59:00Z"))).toBe(false);
-    expect(withinCampaignWindow(settings, new Date("2026-09-16T12:00:00Z"))).toBe(true);
-    expect(withinCampaignWindow(settings, new Date("2026-09-16T21:00:00Z"))).toBe(false);
+    expect(withinCampaignWindow(settings, new Date("2026-09-16T12:29:00Z"))).toBe(false);
+    expect(withinCampaignWindow(settings, new Date("2026-09-16T12:30:00Z"))).toBe(true);
+    expect(withinCampaignWindow(settings, new Date("2026-09-16T20:30:00Z"))).toBe(false);
     expect(withinCampaignWindow(settings, new Date("2026-09-19T15:00:00Z"))).toBe(false);
   });
   it("respeita os dois extremos do jitter", () => {
-    expect(campaignJitterSeconds(settings, 0)).toBe(120);
-    expect(campaignJitterSeconds(settings, 0.999999)).toBe(300);
+    expect(campaignJitterSeconds(settings, 0)).toBe(180);
+    expect(campaignJitterSeconds(settings, 0.999999)).toBe(420);
     expect(() => campaignJitterSeconds(settings, 1)).toThrow();
     expect(() => campaignJitterSeconds(settings, NaN)).toThrow();
   });
@@ -128,7 +132,7 @@ describe("politica de envio no backend", () => {
       decideCampaignSend({ ...snapshot, initial: false, new_contacts_today: 20 }, settings, now),
     ).toEqual({ allowed: true });
   });
-  it("bloqueia reabordagem durante 30 dias", () => {
+  it("bloqueia reabordagem durante 60 dias", () => {
     expect(
       decideCampaignSend(
         { ...snapshot, last_other_campaign_send: new Date(now.getTime() - 86400000) },
@@ -138,7 +142,7 @@ describe("politica de envio no backend", () => {
     ).toMatchObject({ reason: "cooldown" });
     expect(
       decideCampaignSend(
-        { ...snapshot, last_other_campaign_send: new Date(now.getTime() - 30 * 86400000) },
+        { ...snapshot, last_other_campaign_send: new Date(now.getTime() - 60 * 86400000) },
         settings,
         now,
       ),
@@ -150,6 +154,25 @@ describe("politica de envio no backend", () => {
     ).toMatchObject({ reason: "interval" });
     expect(decideCampaignSend(snapshot, settings, new Date("2026-09-20T15:00:00Z"))).toMatchObject({
       reason: "outside_window",
+    });
+  });
+  it("exige consentimento, score e mantém o circuito em espera", () => {
+    expect(decideCampaignSend({ ...snapshot, consent: false }, settings, now)).toMatchObject({
+      allowed: false,
+      terminal: true,
+      reason: "awaiting_consent",
+    });
+    expect(decideCampaignSend({ ...snapshot, score: 69 }, settings, now)).toMatchObject({
+      allowed: false,
+      terminal: true,
+      reason: "score_below_minimum",
+    });
+    expect(
+      decideCampaignSend({ ...snapshot, circuit_breaker_open: true }, settings, now),
+    ).toMatchObject({
+      allowed: false,
+      terminal: false,
+      reason: "circuit_breaker",
     });
   });
 });

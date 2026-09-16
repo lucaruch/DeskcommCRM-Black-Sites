@@ -23,7 +23,12 @@ export async function registrarRespostaDeProspeccao(
     if (error || !recipients?.length) return;
 
     const optedOut = ehPedidoDeOptOut(input.texto);
-    const nextStatus = optedOut ? "opted_out" : "replied";
+    const notInterested =
+      !optedOut &&
+      /\b(?:nao|não)\s+(?:tenho|quero|possuo)\s+interesse\b|\bsem\s+interesse\b/i.test(
+        input.texto ?? "",
+      );
+    const nextStatus = optedOut ? "opted_out" : notInterested ? "not_interested" : "replied";
     const now = new Date().toISOString();
     for (const recipient of recipients) {
       await admin
@@ -32,6 +37,28 @@ export async function registrarRespostaDeProspeccao(
         .eq("organization_id", input.organizationId)
         .eq("id", recipient.id)
         .in("status", ["pending", "scheduled", "queued", "processing", "sent"]);
+    }
+
+    if (optedOut) {
+      const details = await admin
+        .from("prospecting_recipients")
+        .select("campaign_id,phone_number,external_id,site_key")
+        .eq("organization_id", input.organizationId)
+        .eq("contact_id", input.contactId);
+      for (const recipient of details.data ?? []) {
+        await admin.from("prospecting_suppressions").upsert(
+          {
+            organization_id: input.organizationId,
+            contact_id: input.contactId,
+            phone_number: recipient.phone_number,
+            external_id: recipient.external_id,
+            site_key: recipient.site_key,
+            reason: "opt_out",
+            source: "inbound_whatsapp",
+          },
+          { onConflict: "organization_id,phone_number" },
+        );
+      }
     }
 
     await admin
@@ -71,7 +98,11 @@ export async function registrarRespostaDeProspeccao(
         organization_id: input.organizationId,
         campaign_id: recipient.campaign_id,
         recipient_id: recipient.id,
-        type: optedOut ? "recipient.opted_out" : "recipient.replied",
+        type: optedOut
+          ? "recipient.opted_out"
+          : notInterested
+            ? "recipient.not_interested"
+            : "recipient.replied",
         metadata: { source: "inbound_message" },
       })),
     );

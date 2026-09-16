@@ -46,6 +46,9 @@ type RecipientRow = {
   contact_blocked: boolean;
   contact_anonymized: boolean;
   consent: Record<string, unknown> | null;
+  score: number | null;
+  whatsapp_opt_in: boolean;
+  suppressed: boolean;
   last_inbound_at: Date | null;
   next_send_at: Date | null;
   sent_stage_id: string | null;
@@ -67,11 +70,16 @@ function retryAt(
 ): Date {
   if (reason === "interval" && row.next_send_at && row.next_send_at > now) return row.next_send_at;
   if (reason === "outside_window") return nextWindow(settings, now);
-  return new Date(now.getTime() + (reason === "channel_unavailable" ? 5 * 60_000 : 60_000));
+  if (reason === "circuit_breaker") return new Date(now.getTime() + 30 * 60_000);
+  if (reason === "channel_unavailable") return new Date(now.getTime() + 5 * 60_000);
+  return new Date(now.getTime() + 60_000);
 }
 
 function terminalStatus(reason: string): string {
   if (reason === "contact_blocked") return "blocked";
+  if (reason === "awaiting_consent") return "awaiting_consent";
+  if (reason === "score_below_minimum") return "rejected";
+  if (reason === "circuit_breaker") return "queued";
   if (reason === "replied") return "replied";
   if (reason === "cancelled") return "cancelled";
   if (reason === "campaign_closed" || reason === "invalid_recipient_or_message") return "skipped";
@@ -89,6 +97,10 @@ async function loadRecipient(
        r.sent_at,r.replied_at,c.status as campaign_status,c.settings as campaign_settings,
        c.channel_session_id,ch.status as channel_status,cnt.is_blocked as contact_blocked,
        cnt.is_anonymized as contact_anonymized,cnt.consent,
+       r.score,r.whatsapp_opt_in,
+       exists(select 1 from prospecting_suppressions s where s.organization_id=r.organization_id
+         and (s.phone_number=r.phone_number or (s.external_id is not null and s.external_id=r.external_id)
+           or (s.site_key is not null and s.site_key=r.site_key))) as suppressed,
        conv.last_inbound_at,c.next_send_at,c.sent_stage_id
      from prospecting_recipients r
      join prospecting_campaigns c on c.organization_id=r.organization_id and c.id=r.campaign_id
@@ -120,6 +132,44 @@ async function reserveSend(
     }
     current.step = Math.max(current.step, requestedStep);
     const effectiveSettings = campaignSettingsSchema.parse(current.campaign_settings);
+    if (effectiveSettings.circuit_breaker_enabled && !effectiveSettings.circuit_breaker_open) {
+      const recent = await db.query<{ status: string }>(
+        `select status from prospecting_recipients
+         where organization_id=$1 and campaign_id=$2
+           and status in ('sent','delivered','read','replied','failed','blocked','opted_out','not_interested')
+         order by updated_at desc limit 40`,
+        [row.organization_id, row.campaign_id],
+      );
+      const sample = recent.rows;
+      const failures = sample.filter((item) => ["failed", "blocked"].includes(item.status)).length;
+      const optOuts = sample.filter((item) => item.status === "opted_out").length;
+      if (
+        sample.length >= 10 &&
+        (failures / sample.length >= effectiveSettings.circuit_failure_rate ||
+          optOuts / sample.length >= effectiveSettings.circuit_opt_out_rate)
+      ) {
+        const reason = `circuit_breaker failures=${failures}/${sample.length} opt_outs=${optOuts}/${sample.length}`;
+        await db.query(
+          `update prospecting_campaigns
+           set status='paused',settings=settings||jsonb_build_object('circuit_breaker_open',true,'circuit_breaker_reason',$3),updated_at=now()
+           where organization_id=$1 and id=$2`,
+          [row.organization_id, row.campaign_id, reason],
+        );
+        await recordProspectingEvent(
+          db,
+          row.organization_id,
+          row.campaign_id,
+          row.id,
+          "campaign.circuit_breaker",
+          { reason },
+        );
+        await db.query("commit");
+        throw new ProspectingDeferredError(
+          new Date(now.getTime() + 30 * 60_000),
+          "circuit_breaker",
+        );
+      }
+    }
     const { rows: sentRows } = await db.query<{ n: number }>(
       `select count(*)::int as n from prospecting_recipients
        where organization_id=$1 and campaign_id=$3
@@ -138,11 +188,22 @@ async function reserveSend(
       channel_working: current.channel_status === "WORKING",
       blocked: current.contact_blocked,
       anonymized: current.contact_anonymized,
+      suppressed: current.suppressed,
       opted_out: Boolean((consent.marketing as Record<string, unknown> | undefined)?.revoked_at),
       replied: Boolean(current.last_inbound_at),
-      cancelled: ["cancelled", "blocked", "opted_out", "replied", "skipped"].includes(
-        current.status,
-      ),
+      consent: current.whatsapp_opt_in,
+      score: current.score ?? 0,
+      circuit_breaker_open: effectiveSettings.circuit_breaker_open,
+      cancelled: [
+        "cancelled",
+        "blocked",
+        "opted_out",
+        "replied",
+        "skipped",
+        "not_interested",
+        "awaiting_consent",
+        "rejected",
+      ].includes(current.status),
       approved: Boolean(current.approved_at),
       valid_phone: true,
       valid_message: Boolean(current.message),
@@ -157,6 +218,7 @@ async function reserveSend(
       const deferred = [
         "campaign_inactive",
         "channel_unavailable",
+        "circuit_breaker",
         "awaiting_approval",
         "cooldown",
         "daily_limit",
@@ -181,7 +243,7 @@ async function reserveSend(
       }
       const retry = retryAt(current, effectiveSettings, now, decision.reason);
       await db.query(
-        "update prospecting_recipients set status='queued',last_error=$3,updated_at=now() where organization_id=$1 and id=$2",
+        "update prospecting_recipients set status=case when $3='channel_unavailable' then 'waiting_connection' else 'queued' end,last_error=$3,updated_at=now() where organization_id=$1 and id=$2",
         [row.organization_id, row.id, decision.reason],
       );
       await db.query("rollback");
