@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.1
 info:
   title: DeskcommCRM - Prospecção Black Sites
   version: 1.0.0
@@ -16,7 +16,14 @@ paths:
       security:
         - deskcommBearer: []
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Identificador único desta execução diária. Gere um valor novo a cada lote.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
       requestBody:
         required: true
         content:
@@ -39,7 +46,13 @@ paths:
       operationId: consultarExecucaoProspeccao
       summary: Consulta uma execução diária
       parameters:
-        - $ref: "#/components/parameters/RunId"
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
       responses:
         "200":
           description: Execução e destinatários importados
@@ -75,17 +88,6 @@ components:
       scheme: bearer
       bearerFormat: dsk_token
       description: Token criado no CRM com apenas prospecting:write e prospecting:read. Nunca cole um token real neste arquivo.
-  parameters:
-    IdempotencyKey:
-      name: Idempotency-Key
-      in: header
-      required: true
-      schema: { type: string, minLength: 1, maxLength: 200 }
-    RunId:
-      name: run_id
-      in: path
-      required: true
-      schema: { type: string, minLength: 1, maxLength: 200 }
   schemas:
     ProspectBatch:
       type: object
