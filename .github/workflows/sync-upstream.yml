@@ -1,0 +1,61 @@
+name: Sincronizar DeskcommCRM oficial
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Baixar o repositório customizado
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Buscar atualizações oficiais
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/melgarafael/DeskcommCRM.git
+          git fetch upstream main --tags
+
+      - name: Montar branch de revisão
+        id: merge
+        env:
+          BRANCH: automation/sync-upstream
+        run: |
+          set -euo pipefail
+          git config user.name "black-sites-sync[bot]"
+          git config user.email "black-sites-sync[bot]@users.noreply.github.com"
+          git switch --create "${BRANCH}" origin/main
+          if ! git merge --no-edit upstream/main; then
+            git merge --abort || true
+            echo "conflito entre as customizações da Black Sites e o DeskcommCRM oficial"
+            echo "resultado=conflict" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          if git diff --quiet origin/main HEAD; then
+            echo "resultado=sem_atualizacao" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git push --force-with-lease origin "${BRANCH}"
+          echo "resultado=atualizacao" >> "$GITHUB_OUTPUT"
+
+      - name: Abrir ou atualizar revisão
+        if: steps.merge.outputs.resultado == 'atualizacao'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh pr list --base main --head "${GITHUB_REPOSITORY_OWNER}:automation/sync-upstream" --state open --json number --jq '.[0].number' | grep -q . || \
+            gh pr create \
+              --base main \
+              --head automation/sync-upstream \
+              --title "Sincronizar atualizações do DeskcommCRM oficial" \
+              --body "Atualização automática do upstream. Revise conflitos, migrations e testes antes de fazer merge na produção da Black Sites."
