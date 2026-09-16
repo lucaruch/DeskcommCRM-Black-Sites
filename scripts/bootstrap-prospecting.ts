@@ -166,7 +166,12 @@ async function main() {
             admin.rows[0].id,
             prefix,
             `\\x${hash.toString("hex")}`,
-            ["prospecting:write", "prospecting:read", "role:manager", "actor:ai_agent"],
+            JSON.stringify([
+              "prospecting:write",
+              "prospecting:read",
+              "role:manager",
+              "actor:ai_agent",
+            ]),
           ],
         );
       }
