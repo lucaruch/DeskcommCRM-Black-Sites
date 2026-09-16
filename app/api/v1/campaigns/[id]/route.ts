@@ -129,7 +129,7 @@ export async function PATCH(
     actorUserId: authz.user.id,
     organizationId: authz.org.orgId,
     resourceType: "prospecting_campaign",
-    resourceId: id.data,
+    resourceId: updated.data.id,
     requestId,
     metadata: { fields: Object.keys(patch) },
   });

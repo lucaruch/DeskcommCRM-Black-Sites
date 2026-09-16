@@ -23,6 +23,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   }
   const updated = await db.from("prospecting_campaigns").update({ status: next[requested], updated_at: new Date().toISOString() }).eq("organization_id", authz.org.orgId).eq("id", id.data).select("id,status").single();
   if (updated.error) return fail("internal_error", "Falha ao alterar estado.", 500, { requestId });
-  void audit({ action: `prospecting.campaign_${requested}`, actorUserId: authz.user.id, organizationId: authz.org.orgId, resourceType: "prospecting_campaign", resourceId: id.data, requestId, metadata: { from: current.data.status, to: next[requested] } });
+  void audit({ action: `prospecting.campaign_${requested}`, actorUserId: authz.user.id, organizationId: authz.org.orgId, resourceType: "prospecting_campaign", resourceId: updated.data.id, requestId, metadata: { from: current.data.status, to: next[requested] } });
   return ok(updated.data, { requestId });
 }
