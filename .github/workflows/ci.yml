@@ -36,6 +36,9 @@ jobs:
 
       - name: Typecheck
         run: pnpm typecheck
+        env:
+          # O projeto ultrapassa o limite padrão de heap do Node no runner.
+          NODE_OPTIONS: --max-old-space-size=6144
 
       - name: Lint
         run: pnpm lint
