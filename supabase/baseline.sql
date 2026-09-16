@@ -23817,6 +23817,35 @@ begin
   get diagnostics v_count = row_count;
   v_counts := v_counts || jsonb_build_object('voice_calls', v_count);
 
+  -- 7c. prospecting_recipients — anonimiza dados usados na prospeccao.
+  update public.prospecting_recipients set
+    phone_number = '+000000000',
+    external_id = null,
+    company_key = 'anon-' || substring(p_contact_id::text from 1 for 8),
+    site_key = null,
+    data = '{}'::jsonb,
+    message = null,
+    last_error = null,
+    status = case
+      when status in ('sent','delivered','read','replied') then status
+      else 'blocked'
+    end,
+    updated_at = now()
+  where organization_id = p_organization_id
+    and contact_id = p_contact_id;
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('prospecting_recipients', v_count);
+
+  update public.prospecting_events set metadata = '{}'::jsonb
+  where organization_id = p_organization_id
+    and recipient_id in (
+      select id from public.prospecting_recipients
+      where organization_id = p_organization_id
+        and contact_id = p_contact_id
+    );
+  get diagnostics v_count = row_count;
+  v_counts := v_counts || jsonb_build_object('prospecting_events', v_count);
+
   -- 8. dense audit row
   insert into api_audit_log (organization_id, action, actor_user_id, resource_type, resource_id, metadata, bypassed_rls)
   values (
@@ -26251,72 +26280,3 @@ begin
 end $$;
 alter table public.job_queue add constraint job_queue_turn_needs_contact
   check ((kind in ('inbound_turn','followup_turn','case_reply_turn','operator_turn','transactional_delivery','approved_reply','campaign_send')) = (contact_id is not null));
-
--- ---- Cascata LGPD da prospeccao (migration 0264) ----
-DO $$
-BEGIN
-  IF to_regprocedure('public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid)') IS NOT NULL
-     AND to_regprocedure('public.fn_lgpd_cascade_redact_contact_legacy_0264(uuid,uuid,uuid)') IS NULL THEN
-    ALTER FUNCTION public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid)
-      RENAME TO fn_lgpd_cascade_redact_contact_legacy_0264;
-  END IF;
-END $$;
-
-DO $create$
-BEGIN
-  IF to_regprocedure('public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid)') IS NULL THEN
-    CREATE FUNCTION public.fn_lgpd_cascade_redact_contact(
-      p_organization_id uuid,
-      p_contact_id uuid,
-      p_request_id uuid
-    ) RETURNS jsonb
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    SET search_path TO 'public', 'pg_temp'
-    AS $prospecting_lgpd$
-DECLARE
-  v_result jsonb;
-  v_count integer;
-BEGIN
-  v_result := public.fn_lgpd_cascade_redact_contact_legacy_0264(
-    p_organization_id,
-    p_contact_id,
-    p_request_id
-  );
-  UPDATE public.prospecting_recipients
-     SET phone_number = '+000000000',
-         external_id = NULL,
-         company_key = 'anon-' || substring(p_contact_id::text from 1 for 8),
-         site_key = NULL,
-         data = '{}'::jsonb,
-         message = NULL,
-         last_error = NULL,
-         status = CASE
-           WHEN status IN ('sent','delivered','read','replied') THEN status
-           ELSE 'blocked'
-         END,
-         updated_at = now()
-   WHERE organization_id = p_organization_id
-     AND contact_id = p_contact_id;
-  GET DIAGNOSTICS v_count = ROW_COUNT;
-  v_result := coalesce(v_result, '{}'::jsonb)
-    || jsonb_build_object('prospecting_recipients', v_count);
-  UPDATE public.prospecting_events
-     SET metadata = '{}'::jsonb
-   WHERE organization_id = p_organization_id
-     AND recipient_id IN (
-       SELECT id FROM public.prospecting_recipients
-        WHERE organization_id = p_organization_id
-          AND contact_id = p_contact_id
-     );
-  GET DIAGNOSTICS v_count = ROW_COUNT;
-  RETURN v_result || jsonb_build_object('prospecting_events', v_count);
-END;
-$prospecting_lgpd$;
-  END IF;
-END
-$create$;
-REVOKE ALL ON FUNCTION public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid)
-  FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid)
-  TO service_role;
