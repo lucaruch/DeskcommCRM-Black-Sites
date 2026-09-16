@@ -353,7 +353,7 @@ async function ingestOne(
     phone_number,external_id,company_key,site_key,data,message,approved_at,dry_run,status,scheduled_at,
     run_id,score,whatsapp_opt_in,whatsapp_opt_in_source,whatsapp_opt_in_at)
     values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,case when $11 then now() else null end,$12,
-      case when $13 then 'pending' else 'awaiting_consent' end,now(),$14,$15,$16,$17,$18,$19) returning id`,
+      case when $13 then 'pending' else 'awaiting_consent' end,now(),$14,$15,$16,$17,$18) returning id`,
       [
         org,
         campaignId,
