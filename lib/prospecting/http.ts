@@ -49,8 +49,28 @@ export async function prospectingRoute(
       });
     if (error instanceof ProspectingError)
       return fail(error.code, error.message, error.status, { requestId });
-    // Nao expor SQL, dados recebidos ou credenciais ao cliente/log.
-    logger.error("[prospecting] falha de operacao", { request_id: requestId });
+    // O cliente recebe uma mensagem genérica. Para diagnóstico operacional,
+    // registramos apenas a classe/código da exceção, nunca payload, token ou
+    // telefone; códigos do Postgres identificam a falha sem expor dados.
+    const failure = error as {
+      code?: unknown;
+      constraint?: unknown;
+      table?: unknown;
+      column?: unknown;
+      message?: unknown;
+    };
+    logger.error("[prospecting] falha de operacao", {
+      request_id: requestId,
+      error_name: error instanceof Error ? error.name : typeof error,
+      error_code: typeof failure.code === "string" ? failure.code : null,
+      error_constraint: typeof failure.constraint === "string" ? failure.constraint : null,
+      error_table: typeof failure.table === "string" ? failure.table : null,
+      error_column: typeof failure.column === "string" ? failure.column : null,
+      error_message:
+        typeof failure.message === "string"
+          ? failure.message.split("\n", 1)[0]!.slice(0, 240)
+          : null,
+    });
     return fail("internal_error", "Nao foi possivel concluir a operacao.", 500, { requestId });
   }
 }
