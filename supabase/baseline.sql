@@ -26262,15 +26262,18 @@ BEGIN
   END IF;
 END $$;
 
-CREATE OR REPLACE FUNCTION public.fn_lgpd_cascade_redact_contact(
-  p_organization_id uuid,
-  p_contact_id uuid,
-  p_request_id uuid
-) RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public', 'pg_temp'
-AS $$
+DO $create$
+BEGIN
+  IF to_regprocedure('public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid)') IS NULL THEN
+    CREATE FUNCTION public.fn_lgpd_cascade_redact_contact(
+      p_organization_id uuid,
+      p_contact_id uuid,
+      p_request_id uuid
+    ) RETURNS jsonb
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path TO 'public', 'pg_temp'
+    AS $prospecting_lgpd$
 DECLARE
   v_result jsonb;
   v_count integer;
@@ -26309,7 +26312,10 @@ BEGIN
   GET DIAGNOSTICS v_count = ROW_COUNT;
   RETURN v_result || jsonb_build_object('prospecting_events', v_count);
 END;
-$$;
+$prospecting_lgpd$;
+  END IF;
+END
+$create$;
 REVOKE ALL ON FUNCTION public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid)
   FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.fn_lgpd_cascade_redact_contact(uuid,uuid,uuid)
