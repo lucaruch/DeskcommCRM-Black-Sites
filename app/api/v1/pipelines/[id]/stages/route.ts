@@ -38,6 +38,24 @@ interface RouteCtx {
 // não limita, mas a tela quebra muito antes disso.
 const bodySchema = z.object({ name: z.string().min(1).max(80) }).strict();
 
+export async function GET(_req: NextRequest, ctx: RouteCtx): Promise<Response> {
+  const requestId = randomUUID();
+  const authz = await requireRole("viewer", { requestId, resource: "crm_stages" });
+  if (!authz.ok) return authz.response;
+  const { id: pipelineId } = await ctx.params;
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("crm_stages")
+    .select("id,name,slug,position,is_won,is_lost")
+    .eq("organization_id", authz.org.orgId)
+    .eq("pipeline_id", pipelineId)
+    .eq("is_archived", false)
+    .order("position", { ascending: true });
+  if (error)
+    return fail("internal_error", "Não foi possível carregar as etapas.", 500, { requestId });
+  return ok(data ?? [], { requestId });
+}
+
 export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
   const supportDenied = await requireSupportWrite();
   if (supportDenied) return supportDenied;
@@ -58,10 +76,15 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<Response> {
 
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
-    return fail("unprocessable_entity", t("Dê um nome à etapa — é o que aparece no topo da coluna."), 422, {
-      requestId,
-      details: parsed.error.flatten(),
-    });
+    return fail(
+      "unprocessable_entity",
+      t("Dê um nome à etapa — é o que aparece no topo da coluna."),
+      422,
+      {
+        requestId,
+        details: parsed.error.flatten(),
+      },
+    );
   }
 
   const supabase = await createClient();

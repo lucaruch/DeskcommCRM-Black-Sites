@@ -556,6 +556,18 @@ export const AUDIT_ACTIONS = [
   // "Cliente pela agenda" ligada ou desligada (migration 0262). Ligar reescreve
   // etiquetas de toda a organização; metadata leva as contagens.
   "crm.cliente_pela_agenda_alterado",
+
+  // Campanhas de prospeccao: criacao, ajustes e transicoes de estado precisam
+  // permitir reconstruir quem autorizou uma mudanca ou um disparo.
+  "prospecting.campaign_created",
+  "prospecting.campaign_updated",
+  "prospecting.campaign_start",
+  "prospecting.campaign_pause",
+  "prospecting.campaign_resume",
+  "prospecting.campaign_complete",
+  "prospecting.campaign_archive",
+  "prospecting.accepted",
+  "prospecting.recipient_replied",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

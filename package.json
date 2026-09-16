@@ -29,6 +29,7 @@
     "lint:channels": "tsx scripts/lint-channels.ts",
     "lint:role-rank": "tsx scripts/lint-role-rank.ts",
     "skills:sync": "tsx scripts/sincronizar-skills.ts",
+    "bootstrap:prospecting": "tsx --env-file=.env scripts/bootstrap-prospecting.ts",
     "release:conferir": "tsx scripts/cortar-release.ts",
     "release:cortar": "tsx scripts/cortar-release.ts --escrever",
     "gov:verify": "pnpm typecheck && pnpm lint && pnpm lint:channels && pnpm lint:role-rank && pnpm test:unit",

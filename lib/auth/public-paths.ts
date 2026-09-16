@@ -3,6 +3,8 @@
  * Match precedence: array order. First match wins.
  */
 export const PUBLIC_PATHS: RegExp[] = [
+  // Autenticacao dual e scopes especificos verificados dentro destas rotas.
+  /^\/api\/v1\/prospecting\/leads(?:\/[0-9a-f-]{36})?$/,
   /^\/$/,
   /^\/login(\/.*)?$/,
   /^\/signup$/,

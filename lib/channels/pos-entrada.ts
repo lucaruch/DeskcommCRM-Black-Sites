@@ -46,6 +46,7 @@ import { ehPedidoDeOptOut } from "@/lib/opt-out/deteccao";
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { autorizarContatoParaIA } from "@/lib/ai/elegibilidade/autorizacao";
 import { casarCampanha, lerCampanhas } from "@/lib/ai/elegibilidade/campanha";
+import { registrarRespostaDeProspeccao } from "@/lib/prospecting/reply";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -116,6 +117,11 @@ export async function aplicarEfeitosPosEntrada(
   entrada: EntradaDeMensagem,
 ): Promise<void> {
   await aplicarOptOut(admin, entrada);
+  await registrarRespostaDeProspeccao(admin, {
+    organizationId: entrada.organizationId,
+    contactId: entrada.contactId,
+    texto: entrada.texto,
+  });
   await abrirDemanda(admin, entrada);
   await avaliarCampanha(admin, entrada);
   // A resposta do lead avança o follow-up AQUI. O despacho do agente (LLM)
@@ -290,20 +296,23 @@ async function abrirDemanda(admin: Admin, entrada: EntradaDeMensagem): Promise<v
 async function pedirDespachoDoAgente(admin: Admin, entrada: EntradaDeMensagem): Promise<void> {
   if (!entrada.messageId) return;
 
-  const { error } = await admin.rpc("emit_event" as never, {
-    p_event_type: "ai_agent.dispatch_requested",
-    p_entity_kind: "message",
-    p_entity_id: entrada.messageId,
-    p_payload: {
-      organization_id: entrada.organizationId,
-      conversation_id: entrada.conversationId,
-      contact_id: entrada.contactId,
-      channel_session_id: entrada.channelSessionId,
-      inbound_message_id: entrada.messageId,
-    },
-    p_metadata: { source: entrada.origem, request_id: entrada.requestId },
-    p_organization_id: entrada.organizationId,
-  } as never);
+  const { error } = await admin.rpc(
+    "emit_event" as never,
+    {
+      p_event_type: "ai_agent.dispatch_requested",
+      p_entity_kind: "message",
+      p_entity_id: entrada.messageId,
+      p_payload: {
+        organization_id: entrada.organizationId,
+        conversation_id: entrada.conversationId,
+        contact_id: entrada.contactId,
+        channel_session_id: entrada.channelSessionId,
+        inbound_message_id: entrada.messageId,
+      },
+      p_metadata: { source: entrada.origem, request_id: entrada.requestId },
+      p_organization_id: entrada.organizationId,
+    } as never,
+  );
 
   if (error) {
     logger.warn("pos-entrada: emit ai_agent.dispatch_requested falhou", {

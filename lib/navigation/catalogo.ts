@@ -196,6 +196,16 @@ export const NAV_CATALOG = [
     sidebar: true,
   },
   {
+    href: "/app/disparos",
+    label: "Disparos",
+    description: "Prospecção automática com cadência, limites e acompanhamento por lead.",
+    icon: "Megaphone",
+    group: "crm",
+    section: "O dia a dia da venda",
+    sidebar: true,
+    minRole: "viewer",
+  },
+  {
     // ⚠️ Esta tela nasceu porque a FERRAMENTA já existia sem ela. O agente de IA
     // vinha com "procurar produto na loja" ligada por padrão, lendo uma tabela
     // que ninguém nunca preencheu — e o efeito não era silêncio: era o agente

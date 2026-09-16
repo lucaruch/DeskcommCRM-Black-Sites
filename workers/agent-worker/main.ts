@@ -6,6 +6,7 @@ import { AgendaDeferredError } from "@/lib/agenda/protecao-followup";
 import { avisarRespostaDeCasoObsoleto } from "@/lib/atendimento/aviso-caso-obsoleto";
 import { withServiceJob } from "@/lib/atendimento/fronteira-server";
 import { StaleServiceBoundaryError } from "@/lib/atendimento/fronteira";
+import { createProspectingSendHandler, ProspectingDeferredError } from "@/lib/prospecting/worker";
 /**
  * Worker 24/7 do agent-engine (fusão Vendaval → DeskcommCRM) — o processo
  * long-running que o CRM não tinha: fila durável, cron/follow-up, drain do
@@ -361,7 +362,8 @@ export async function startWorker(
           log,
           loopsAbort.signal,
         )
-      : (log.info('ponte WaCalls OFF — endereço ou credencial ausente no env', {}), Promise.resolve());
+      : (log.info("ponte WaCalls OFF — endereço ou credencial ausente no env", {}),
+        Promise.resolve());
 
   // Circuito de saúde do número (block/response rate → hold).
   const healthLoop = runHealthLoop(
@@ -445,6 +447,20 @@ export async function startWorker(
             job.organization_id,
             workerId,
             err.protection.reavaliar_em,
+            err.message,
+            claimOfJob(job)?.acquired_at ?? null,
+          ],
+        );
+        return;
+      }
+      if (err instanceof ProspectingDeferredError) {
+        await pool.query(
+          "update job_queue set status='pending',run_after=$4,locked_by=null,locked_at=null,attempts=greatest(attempts-1,0),last_error=$5 where id=$1 and organization_id=$2 and locked_by=$3 and status='running' and locked_at=$6",
+          [
+            job.id,
+            job.organization_id,
+            workerId,
+            err.retryAt,
             err.message,
             claimOfJob(job)?.acquired_at ?? null,
           ],
@@ -638,6 +654,7 @@ export async function main(): Promise<void> {
   // worker que não conhecesse o kind faria os jobs morrerem em 'dead' sem que
   // ninguém entendesse por quê.
   handlers.set("operator_turn", createOperatorTurnHandler(turnDeps));
+  handlers.set("campaign_send", createProspectingSendHandler(turnDeps.crmCfg));
   await startWorker(env, handlers, log);
 }
 
