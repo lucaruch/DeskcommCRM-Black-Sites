@@ -45,9 +45,12 @@ aplica.
 
 > Em desenvolvimento local, ainda nao aplicada em producao: `20260916210000_0263_prospecting_campaigns`.
 
+> Tambem em desenvolvimento local, ainda nao aplicada em producao: `20260916220000_0264_lgpd_prospecting_recipients`.
+
 | Version | Name | Description |
 |---|---|---|
 | `20260916210000` | `0263_prospecting_campaigns` | Campanhas, destinatarios, eventos e idempotencia de prospeccao, com RLS de leitura e FKs compostas por organizacao. Em desenvolvimento; nao aplicada em producao. |
+| `20260916220000` | `0264_lgpd_prospecting_recipients` | A cascata de anonimização de contato também redige destinatários e eventos de prospecção; preserva métricas não identificáveis e mantém a função legada como implementação interna. Em desenvolvimento; nao aplicada em producao. |
 | `20260428195354` | `0001_platform_base` | organizations, user_organizations, platform_admins, api_tokens, api_audit_log, user_recovery_codes, idempotency_keys + RLS helpers (fn_user_org_ids, fn_is_platform_admin, fn_user_role_in_org, fn_role_at_least) |
 | `20260428195513` | `0002_event_log_and_compat` | event_log + emit_event/fn_log_event helpers + compat aliases (fn_set_updated_at, fn_user_role_in returning int) |
 | `20260428195708` | `0003_customer_360` | contacts (CPF encrypted), crm_pipelines, crm_stages, crm_leads, crm_lead_activities, crm_lead_links, merge_queue + 5 domain triggers |

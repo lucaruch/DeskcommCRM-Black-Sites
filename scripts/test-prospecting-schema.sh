@@ -20,8 +20,12 @@ for pass in install update; do
   docker exec -i "$CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 -q < "$ROOT/supabase/baseline.sql" >"$ROOT/$pass.log" 2>&1
   printf 'baseline %s OK\n' "$pass"
 done
-docker exec -i "$CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 -q \
-  < "$ROOT/supabase/migrations/20260916210000_0263_prospecting_campaigns.sql" >/dev/null 2>&1
+for migration in \
+  20260916210000_0263_prospecting_campaigns.sql \
+  20260916220000_0264_lgpd_prospecting_recipients.sql; do
+  docker exec -i "$CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 -q \
+    < "$ROOT/supabase/migrations/$migration" >/dev/null 2>&1
+done
 docker exec -i "$CONTAINER" psql -U postgres -v ON_ERROR_STOP=1 -q <<'SQL'
 do $$
 declare n integer;

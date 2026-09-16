@@ -75,6 +75,26 @@ interface Excecao {
  * linhas da OUTRA organização, não uma leitura como superusuário.
  */
 const PROVA_PROPRIA: readonly Excecao[] = [
+  {
+    tabela: "prospecting_campaigns",
+    razao:
+      "tests/invariants/prospecting-isolation.test.ts — fixture com JWT authenticated prova leitura local e zero linhas do tenant B; FKs compostas também são exercitadas.",
+  },
+  {
+    tabela: "prospecting_recipients",
+    razao:
+      "tests/invariants/prospecting-isolation.test.ts — fixture com JWT authenticated prova leitura local e zero linhas do tenant B; acesso de escrita é negado ao papel.",
+  },
+  {
+    tabela: "prospecting_events",
+    razao:
+      "tests/invariants/prospecting-isolation.test.ts — fixture com JWT authenticated prova leitura local e zero linhas do tenant B; append-only é exercitado no teste de privilégios.",
+  },
+  {
+    tabela: "prospecting_requests",
+    razao:
+      "tests/invariants/prospecting-isolation.test.ts — acesso SELECT é negado a authenticated e anon, enquanto RLS fica ligada; idempotência é somente service-role.",
+  },
   { tabela: "channel_routing_policies", razao: "tests/invariants/channel-routing.test.ts — dois tenants reais, leitura positiva local e negativa cruzada por JWT; FK composta rejeita canal de outra org" },
   { tabela: "channel_routing_responsibles", razao: "tests/invariants/channel-routing.test.ts — JWT do tenant B não lê responsáveis de A; revogação remove vínculo e claim revalida membro ativo" },
   { tabela: "channel_connection_requests", razao: "tests/invariants/channel-routing.test.ts — recibo privado sem SELECT authenticated; reserva admin com MFA e finalização service-only cercada por org e lease" },
