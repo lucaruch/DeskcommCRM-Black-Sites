@@ -112,14 +112,33 @@ components:
         empresa: { type: string }
         telefone: { type: string, description: E.164 ou telefone brasileiro normalizado pelo CRM }
         responsavel: { type: string }
+        cargo_decisor: { type: string, description: Cargo do decisor somente quando comprovado }
+        acesso_decisor: { type: integer, minimum: 0, maximum: 10 }
         email: { type: string }
         site: { type: string }
         cidade: { type: string }
         estado: { type: string }
+        nicho: { type: string }
+        instagram: { type: string }
+        servicos_observados: { type: string }
+        canais_atendimento: { type: string }
+        processo_atual: { type: string }
         score: { type: integer, minimum: 0, maximum: 100, example: 82 }
         oportunidade: { type: string }
         motivo_abordagem: { type: string }
+        automacao_proposta: { type: string }
+        fluxo_automacao: { type: string }
         mensagem_sugerida: { type: string }
+        mensagem_inicial: { type: string }
+        followup_1: { type: string }
+        followup_2: { type: string }
+        ultima_mensagem: { type: string }
+        roteiro_audio: { type: string }
+        roteiro_demonstracao: { type: string }
+        proxima_acao: { type: string }
+        status_comercial:
+          type: string
+          enum: [NOVO, PESQUISADO, "PRONTO PARA CONTATO", "CONTATO REALIZADO", RESPONDEU, "DEMONSTRAÇÃO", "REUNIÃO", PROPOSTA, "NEGOCIAÇÃO", FECHADO, "SEM INTERESSE", "FOLLOW-UP FUTURO"]
         whatsapp_opt_in: { type: boolean, description: Deve ser true para envio automático }
         whatsapp_opt_in_source:
           type: string
