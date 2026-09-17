@@ -83,10 +83,12 @@ export async function sendTurnMessage(
     'select payload,kind from job_queue where id=$1 and organization_id=$2 and contact_id=$3',
     [input.jobId, input.tenantId, input.leadId],
   );
-  await requireCurrentServiceBoundary(
-    db,
-    parseServiceBoundary(sourceJobs[0]?.payload.service_boundary),
-  );
+  const serviceBoundary = parseServiceBoundary(sourceJobs[0]?.payload.service_boundary);
+  // Campaign sends create their conversation immediately before this call and
+  // therefore have no captured conversational boundary yet.
+  if (serviceBoundary || sourceJobs[0]?.kind !== "campaign_send") {
+    await requireCurrentServiceBoundary(db, serviceBoundary);
+  }
   const proactiveContext =
     sourceJobs[0]?.kind === 'followup_turn' && input.leadId
       ? {
@@ -136,7 +138,7 @@ export async function sendTurnMessage(
           organization_id: input.tenantId,
           actor: { type: 'ai_agent', id: cfg.agentActorId ?? AGENT_ACTOR_ID, role: 'manager' },
           requestId: idempotencyKey,
-          serviceBoundary: parseServiceBoundary(sourceJobs[0]?.payload.service_boundary),
+          serviceBoundary,
           proactiveContext,
           meetingDelivery,
           approvedReply,
