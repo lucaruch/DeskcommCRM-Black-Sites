@@ -128,7 +128,7 @@ function usablePhone(value) {
 function prepareProspects(batch) {
   if (!Array.isArray(batch?.prospects) || batch.prospects.length !== 10)
     throw new Error("A pesquisa nao retornou exatamente 10 prospects.");
-  const prospects = batch.prospects.map((prospect) => ({
+  const prospects = batch.prospects.map(({ fontes_verificadas, ...prospect }) => ({
     ...prospect,
     origem: "openai_scheduled_search",
     status_comercial: "PESQUISADO",
