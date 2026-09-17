@@ -6,6 +6,7 @@ import type { Actor } from "@/lib/api/handlers/types";
 import { phoneLookupVariants } from "@/lib/channels/phone-variants";
 import { enqueueJob } from "@/lib/agent-engine/queue/queue";
 import { prospectingTransaction } from "./db";
+import { prospectingJobEventId } from "./job-event-id";
 import { campaignSettingsSchema, renderProspectingMessage, type Prospect } from "./policy";
 
 export class ProspectingError extends Error {
@@ -235,7 +236,7 @@ async function ingestOne(
       const queuedJob = await enqueueJob(db, org, {
         kind: "campaign_send",
         leadId: existing.contact_id,
-        sourceEventId: `prospecting:${existing.id}:0`,
+        sourceEventId: prospectingJobEventId(existing.id, 0),
         payload: { prospecting_recipient_id: existing.id, step: 0 },
         runAfter: new Date(),
         maxAttempts: 8,
@@ -384,7 +385,7 @@ async function ingestOne(
     const queuedJob = await enqueueJob(db, org, {
       kind: "campaign_send",
       leadId: contact.id,
-      sourceEventId: `prospecting:${recipient.id}:0`,
+      sourceEventId: prospectingJobEventId(recipient.id, 0),
       payload: { prospecting_recipient_id: recipient.id, step: 0 },
       runAfter: new Date(),
       maxAttempts: 8,

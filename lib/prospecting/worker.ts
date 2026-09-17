@@ -11,6 +11,7 @@ import {
   withinCampaignWindow,
 } from "./policy";
 import { recordProspectingEvent } from "./ingest";
+import { prospectingJobEventId } from "./job-event-id";
 
 export class ProspectingDeferredError extends Error {
   constructor(
@@ -381,7 +382,7 @@ export function createProspectingSendHandler(
       await enqueueJob(pool, job.organization_id, {
         kind: "campaign_send",
         leadId: reserved.row.contact_id,
-        sourceEventId: `prospecting:${recipientId}:${reserved.row.step + 1}`,
+        sourceEventId: prospectingJobEventId(recipientId, reserved.row.step + 1),
         payload: { prospecting_recipient_id: recipientId, step: reserved.row.step + 1 },
         runAfter: followupAt,
         maxAttempts: 8,
