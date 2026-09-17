@@ -38,7 +38,7 @@ const prospectSchema = {
   ],
   properties: {
     empresa: { type: "string" },
-    telefone: { type: "string" },
+    telefone: { type: "string", pattern: "^\\+55[1-9][0-9][0-9]{8,9}$" },
     site: { type: "string" },
     cidade: { type: "string" },
     estado: { type: "string" },
@@ -65,7 +65,7 @@ Voce e o pesquisador comercial da Black Sites. Execute uma rodada diaria de pros
 
 Data e hora da rodada: ${generatedAt}. Pesquise somente empresas brasileiras reais e use informacoes publicas verificaveis na web. Pesquise pelo menos 20 candidatas em cidades e estados variados e selecione exatamente 10 com maior potencial, score minimo 70.
 
-Para cada selecionada, confirme no site oficial ou fonte publica confiavel: nome, cidade/UF, telefone comercial publico com DDD, site, servicos e um processo repetitivo observavel. Inclua em fontes_verificadas as URLs consultadas. Nao invente pessoas, cargos, telefones, e-mails, necessidades ou fatos. Nao use dados privados.
+Para cada selecionada, confirme no site oficial ou fonte publica confiavel: nome, cidade/UF, telefone comercial publico com DDD, site, servicos e um processo repetitivo observavel. O campo telefone deve conter somente um telefone brasileiro comercial completo, com DDD, no formato E.164 +55XXXXXXXXXX ou +55XXXXXXXXXXX; se a empresa nao tiver telefone publico verificavel, descarte-a e escolha outra. Inclua em fontes_verificadas as URLs consultadas. Nao invente pessoas, cargos, telefones, e-mails, necessidades ou fatos. Nao use dados privados.
 
 O objetivo desta rodada e apenas registrar prospects no CRM para revisao humana. Nao envie WhatsApp, e-mail, DM, ligue, preencha formularios, marque reunioes ou fale com qualquer empresa. Todos os prospects devem entrar sem consentimento de WhatsApp.
 
