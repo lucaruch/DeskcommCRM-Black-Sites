@@ -104,9 +104,17 @@ async function requestOpenAI() {
   const body = await response.json();
   if (!response.ok)
     throw new Error(`OpenAI HTTP ${response.status}: ${body.error?.message || "falha"}`);
-  if (typeof body.output_text !== "string" || !body.output_text.trim())
+  const outputText =
+    typeof body.output_text === "string"
+      ? body.output_text
+      : body.output
+          ?.flatMap((item) => item.content || [])
+          .filter((content) => content.type === "output_text" && typeof content.text === "string")
+          .map((content) => content.text)
+          .join("");
+  if (typeof outputText !== "string" || !outputText.trim())
     throw new Error("OpenAI nao retornou JSON estruturado.");
-  return JSON.parse(body.output_text);
+  return JSON.parse(outputText);
 }
 
 function usablePhone(value) {
