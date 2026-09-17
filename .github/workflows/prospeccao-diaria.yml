@@ -1,0 +1,38 @@
+name: Prospeccao diaria -> CRM
+
+on:
+  schedule:
+    # 07:00 em America/Sao_Paulo (UTC-3). O GitHub pode atrasar alguns minutos.
+    - cron: "0 10 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: prospeccao-diaria
+  cancel-in-progress: false
+
+jobs:
+  importar:
+    if: vars.PROSPECCAO_AUTOMATICA_LIGADA == '1' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_PROSPECTING_MODEL: ${{ vars.OPENAI_PROSPECTING_MODEL }}
+      CRM_PROSPECTING_URL: https://crm.bksly.com.br
+      CRM_PROSPECTING_TOKEN: ${{ secrets.CRM_PROSPECTING_TOKEN }}
+      PROSPECTING_DRY_RUN: "false"
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v7
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Pesquisar e importar prospects
+        run: node scripts/daily-prospecting.mjs

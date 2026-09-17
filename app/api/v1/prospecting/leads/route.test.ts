@@ -113,6 +113,42 @@ describe("POST prospeccao", () => {
     expect((await POST(request({ leads: [lead], dry_run: true }))).status).toBe(200);
     expect(ingestProspects).toHaveBeenCalledWith(expect.objectContaining({ dryRun: true }));
   });
+  it("aceita o dossie comercial de automacao", async () => {
+    const response = await POST(
+      request({
+        leads: [
+          {
+            ...lead,
+            score: 88,
+            responsavel: "Contato Exemplo",
+            cargo_decisor: "Gerente comercial",
+            acesso_decisor: 8,
+            servicos_observados: "Atendimento por WhatsApp e formulario no site.",
+            canais_atendimento: "WhatsApp e Instagram",
+            processo_atual: "Orcamentos respondidos manualmente.",
+            oportunidade: "Qualificacao de pedidos de orcamento",
+            automacao_proposta: "WhatsApp + IA + CRM + follow-up",
+            fluxo_automacao: "site -> WhatsApp -> qualificacao -> CRM -> vendedor",
+            mensagem_inicial: "Ola! Posso mostrar uma ideia para agilizar seus orcamentos?",
+            followup_1: "Posso te enviar um exemplo pratico?",
+            followup_2: "Retomo este assunto ou prefere falar em outro momento?",
+            ultima_mensagem: "Encerrando por aqui. Fico a disposicao.",
+            roteiro_audio: "Ola! Identifiquei uma forma de agilizar seus orcamentos.",
+            roteiro_demonstracao: "Mostrar o fluxo do WhatsApp ao CRM em um minuto.",
+            proxima_acao: "Revisar e aprovar a abordagem",
+            status_comercial: "PRONTO PARA CONTATO",
+          },
+        ],
+        dry_run: true,
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(ingestProspects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        leads: [expect.objectContaining({ automacao_proposta: "WhatsApp + IA + CRM + follow-up" })],
+      }),
+    );
+  });
   it("rejeita lote acima de 25 e telefone invalido", async () => {
     expect((await POST(request({ leads: Array.from({ length: 26 }, () => lead) }))).status).toBe(
       422,

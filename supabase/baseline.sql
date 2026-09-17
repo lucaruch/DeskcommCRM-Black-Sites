@@ -26280,3 +26280,54 @@ begin
 end $$;
 alter table public.job_queue add constraint job_queue_turn_needs_contact
   check ((kind in ('inbound_turn','followup_turn','case_reply_turn','operator_turn','transactional_delivery','approved_reply','campaign_send')) = (contact_id is not null));
+
+-- ---- Execucoes diarias, consentimento e supressao da prospeccao (migration 0265) ----
+alter table public.prospecting_recipients
+  add column if not exists run_id text,
+  add column if not exists score smallint,
+  add column if not exists whatsapp_opt_in boolean not null default false,
+  add column if not exists whatsapp_opt_in_source text,
+  add column if not exists whatsapp_opt_in_at timestamptz;
+alter table public.prospecting_recipients drop constraint if exists prospecting_recipients_status_check;
+alter table public.prospecting_recipients add constraint prospecting_recipients_status_check check (status in (
+  'pending','scheduled','queued','processing','sent','delivered','read','replied','failed','skipped','blocked','cancelled','opted_out','needs_template',
+  'awaiting_consent','waiting_connection','not_interested','rejected'
+));
+alter table public.prospecting_recipients drop constraint if exists prospecting_recipients_score_check;
+alter table public.prospecting_recipients add constraint prospecting_recipients_score_check check (score is null or score between 0 and 100);
+alter table public.prospecting_recipients drop constraint if exists prospecting_recipients_opt_in_source_check;
+alter table public.prospecting_recipients add constraint prospecting_recipients_opt_in_source_check check (whatsapp_opt_in_source is null or whatsapp_opt_in_source in (
+  'website_form','landing_page','qr_code','existing_customer','manual_confirmed','inbound_whatsapp','other_verified'
+));
+create table if not exists public.prospecting_runs (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  run_id text not null check (length(run_id) between 1 and 200), source text not null check (length(source) between 1 and 200), generated_at timestamptz,
+  started_at timestamptz, received_at timestamptz not null default now(), prospects_received integer not null default 0 check (prospects_received >= 0),
+  prospects_created integer not null default 0 check (prospects_created >= 0), prospects_updated integer not null default 0 check (prospects_updated >= 0),
+  duplicates integer not null default 0 check (duplicates >= 0), rejected integer not null default 0 check (rejected >= 0), eligible integer not null default 0 check (eligible >= 0),
+  queued integer not null default 0 check (queued >= 0), awaiting_consent integer not null default 0 check (awaiting_consent >= 0), dry_run boolean not null default false,
+  status text not null default 'received' check (status in ('received','processed','failed')), error_message text, created_at timestamptz not null default now(), updated_at timestamptz not null default now(),
+  unique (organization_id, run_id)
+);
+alter table public.prospecting_requests add column if not exists run_id text;
+create unique index if not exists prospecting_requests_run_id on public.prospecting_requests(organization_id,run_id) where run_id is not null;
+create index if not exists prospecting_recipients_run on public.prospecting_recipients(organization_id,run_id);
+create table if not exists public.prospecting_suppressions (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade, contact_id uuid,
+  phone_number text, external_id text, site_key text, reason text not null check (length(reason) between 1 and 200), source text not null default 'manual',
+  suppressed_at timestamptz not null default now(), created_at timestamptz not null default now(), unique (organization_id,id),
+  foreign key (organization_id,contact_id) references public.contacts(organization_id,id)
+);
+create unique index if not exists prospecting_suppressions_phone on public.prospecting_suppressions(organization_id,phone_number) where phone_number is not null;
+create unique index if not exists prospecting_suppressions_external on public.prospecting_suppressions(organization_id,external_id) where external_id is not null;
+create unique index if not exists prospecting_suppressions_site on public.prospecting_suppressions(organization_id,site_key) where site_key is not null;
+alter table public.prospecting_runs enable row level security;
+alter table public.prospecting_suppressions enable row level security;
+revoke all on public.prospecting_runs,public.prospecting_suppressions from public,anon,authenticated,service_role;
+grant select on public.prospecting_runs,public.prospecting_suppressions to authenticated;
+grant select,insert,update on public.prospecting_runs to service_role;
+grant select,insert,update,delete on public.prospecting_suppressions to service_role;
+drop policy if exists tenant_isolation_prospecting_runs_all on public.prospecting_runs;
+create policy tenant_isolation_prospecting_runs_all on public.prospecting_runs for select to authenticated using (organization_id in (select public.fn_user_org_ids()));
+drop policy if exists tenant_isolation_prospecting_suppressions_all on public.prospecting_suppressions;
+create policy tenant_isolation_prospecting_suppressions_all on public.prospecting_suppressions for select to authenticated using (organization_id in (select public.fn_user_org_ids()));

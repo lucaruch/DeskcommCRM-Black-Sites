@@ -14,6 +14,16 @@ const timezone = z.string().refine((value) => {
   }
 }, "Fuso horario invalido.");
 
+export const whatsappOptInSourceSchema = z.enum([
+  "website_form",
+  "landing_page",
+  "qr_code",
+  "existing_customer",
+  "manual_confirmed",
+  "inbound_whatsapp",
+  "other_verified",
+]);
+
 export const prospectSchema = z.strictObject({
   empresa: z.string().trim().min(1).max(200),
   telefone: z
@@ -31,17 +41,50 @@ export const prospectSchema = z.strictObject({
   external_id: optionalText(200),
   nome: optionalText(200),
   responsavel: optionalText(200),
+  cargo_decisor: optionalText(200),
+  acesso_decisor: z.number().int().min(0).max(10).optional(),
   email: z.email().max(254).optional(),
   cidade: optionalText(120),
   estado: optionalText(80),
   nicho: optionalText(200),
   site: z.url().max(2048).optional(),
   instagram: optionalText(200),
+  servicos_observados: optionalText(2000),
+  canais_atendimento: optionalText(1000),
+  processo_atual: optionalText(2000),
   origem: z.string().trim().min(1).max(100).default("chatgpt_prospeccao"),
   score: z.number().int().min(0).max(100).optional(),
   oportunidade: optionalText(2000),
   motivo_abordagem: optionalText(2000),
+  automacao_proposta: optionalText(2000),
+  fluxo_automacao: optionalText(4000),
   mensagem_sugerida: optionalText(4000),
+  mensagem_inicial: optionalText(4000),
+  followup_1: optionalText(4000),
+  followup_2: optionalText(4000),
+  ultima_mensagem: optionalText(4000),
+  roteiro_audio: optionalText(4000),
+  roteiro_demonstracao: optionalText(4000),
+  proxima_acao: optionalText(1000),
+  status_comercial: z
+    .enum([
+      "NOVO",
+      "PESQUISADO",
+      "PRONTO PARA CONTATO",
+      "CONTATO REALIZADO",
+      "RESPONDEU",
+      "DEMONSTRAÇÃO",
+      "REUNIÃO",
+      "PROPOSTA",
+      "NEGOCIAÇÃO",
+      "FECHADO",
+      "SEM INTERESSE",
+      "FOLLOW-UP FUTURO",
+    ])
+    .optional(),
+  whatsapp_opt_in: z.boolean().default(false),
+  whatsapp_opt_in_source: whatsappOptInSourceSchema.nullable().default(null),
+  whatsapp_opt_in_at: z.string().datetime({ offset: true }).nullable().default(null),
   metadata: z
     .record(z.string().max(100), z.unknown())
     .default({})
@@ -50,13 +93,13 @@ export const prospectSchema = z.strictObject({
 export type Prospect = z.infer<typeof prospectSchema>;
 
 export const DEFAULT_MESSAGE =
-  "Ola! Sou da Black Sites. Trabalhamos com sites e automacoes de atendimento. Gostaria de conversar com quem cuida dessa area na {{empresa}}. Posso enviar uma breve apresentacao? Se preferir nao receber mensagens, responda SAIR.";
+  "Ola {{responsavel}}, tudo bem? Sou da Black Sites. Vi a {{empresa}} e identifiquei uma possibilidade de {{oportunidade}}. Trabalhamos com automacoes para empresas e achei que poderia fazer sentido para voces. Posso te explicar rapidamente? Se preferir nao receber mensagens, responda SAIR.";
 
 export const campaignSettingsSchema = z
   .strictObject({
-    daily_limit: z.number().int().min(1).max(500).default(20),
-    min_interval_seconds: z.number().int().min(60).max(86400).default(120),
-    max_interval_seconds: z.number().int().min(60).max(86400).default(300),
+    daily_limit: z.number().int().min(1).max(500).default(15),
+    min_interval_seconds: z.number().int().min(60).max(86400).default(180),
+    max_interval_seconds: z.number().int().min(60).max(86400).default(420),
     timezone: timezone.default("America/Sao_Paulo"),
     weekdays: z
       .array(z.number().int().min(0).max(6))
@@ -64,9 +107,17 @@ export const campaignSettingsSchema = z
       .max(7)
       .refine((days) => new Set(days).size === days.length)
       .default([1, 2, 3, 4, 5]),
-    window_start: time.default("09:00"),
-    window_end: time.default("18:00"),
-    cooldown_days: z.number().int().min(1).max(365).default(30),
+    window_start: time.default("09:30"),
+    window_end: time.default("17:30"),
+    cooldown_days: z.number().int().min(1).max(365).default(60),
+    minimum_score: z.number().int().min(0).max(100).default(70),
+    consent_required: z.boolean().default(true),
+    dry_run: z.boolean().default(false),
+    circuit_breaker_enabled: z.boolean().default(true),
+    circuit_failure_rate: z.number().min(0.01).max(1).default(0.35),
+    circuit_opt_out_rate: z.number().min(0.01).max(1).default(0.15),
+    circuit_breaker_open: z.boolean().default(false),
+    circuit_breaker_reason: z.string().max(500).nullable().default(null),
     approval: z.enum(["automatic", "manual"]).default("automatic"),
     message: z.string().trim().min(1).max(4000).default(DEFAULT_MESSAGE),
     ai_personalization: z.boolean().default(false),
@@ -81,12 +132,12 @@ export const campaignSettingsSchema = z
       .max(2)
       .default([
         {
-          after_hours: 24,
+          after_hours: 48,
           message:
             "Ola! Retomando meu contato sobre sites e automacoes da Black Sites. Esse assunto faz sentido para a {{empresa}} neste momento? Se nao quiser receber novas mensagens, responda SAIR.",
         },
         {
-          after_hours: 72,
+          after_hours: 120,
           message:
             "Este e meu ultimo contato sobre o assunto. Se sites ou automacoes forem uma prioridade para a {{empresa}}, fico a disposicao. Obrigado pelo seu tempo!",
         },
@@ -197,6 +248,7 @@ export interface SendSnapshot {
   campaign_status: string;
   channel_working: boolean;
   blocked: boolean;
+  suppressed: boolean;
   anonymized: boolean;
   opted_out: boolean;
   replied: boolean;
@@ -205,6 +257,9 @@ export interface SendSnapshot {
   valid_phone: boolean;
   valid_message: boolean;
   dry_run: boolean;
+  consent: boolean;
+  score: number;
+  circuit_breaker_open: boolean;
   initial: boolean;
   new_contacts_today: number;
   last_other_campaign_send: Date | null;
@@ -223,8 +278,12 @@ export function decideCampaignSend(
     terminal,
   });
   if (s.dry_run) return deny("dry_run", true);
-  if (s.opted_out || s.blocked || s.anonymized) return deny("contact_blocked", true);
+  if (s.opted_out || s.blocked || s.anonymized || s.suppressed)
+    return deny("contact_blocked", true);
   if (s.replied) return deny("replied", true);
+  if (settings.consent_required && !s.consent) return deny("awaiting_consent", true);
+  if (s.score < settings.minimum_score) return deny("score_below_minimum", true);
+  if (s.circuit_breaker_open) return deny("circuit_breaker", false);
   if (s.cancelled) return deny("cancelled", true);
   if (!s.valid_phone || !s.valid_message) return deny("invalid_recipient_or_message", true);
   if (["completed", "archived"].includes(s.campaign_status)) return deny("campaign_closed", true);
