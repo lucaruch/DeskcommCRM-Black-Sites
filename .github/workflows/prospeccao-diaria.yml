@@ -29,10 +29,5 @@ jobs:
       - name: Baixar o codigo
         uses: actions/checkout@v7
 
-      - name: Preparar Node.js
-        uses: actions/setup-node@v5
-        with:
-          node-version: 22
-
       - name: Pesquisar e importar prospects
         run: node scripts/daily-prospecting.mjs
