@@ -216,9 +216,10 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
           out.total += metrics.total ?? 0;
           out.sent += metrics.sent ?? 0;
           out.replied += metrics.replied ?? 0;
+          out.awaiting += metrics.awaiting_consent ?? 0;
           return out;
         },
-        { total: 0, sent: 0, replied: 0 },
+        { total: 0, sent: 0, replied: 0, awaiting: 0 },
       ),
     [campaigns],
   );
@@ -305,9 +306,7 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
         <Card>
           <CardContent className="p-4">
             <p className="text-xs text-text-muted">Aguardando consentimento</p>
-            <p className="mt-1 text-2xl font-semibold">
-              {runs.reduce((sum, run) => sum + run.awaiting_consent, 0)}
-            </p>
+            <p className="mt-1 text-2xl font-semibold">{totals.awaiting}</p>
           </CardContent>
         </Card>
         <Card>
