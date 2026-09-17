@@ -464,6 +464,8 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
                       <tr>
                         <th className="px-3 py-2">Empresa</th>
                         <th className="px-3 py-2">Telefone</th>
+                        <th className="px-3 py-2">Oportunidade</th>
+                        <th className="px-3 py-2">Automação proposta</th>
                         <th className="px-3 py-2">Status</th>
                         <th className="px-3 py-2">Etapa</th>
                         <th className="px-3 py-2">Atualizado</th>
@@ -474,6 +476,19 @@ export function DisparosClient({ podeEditar }: { podeEditar: boolean }) {
                         <tr key={recipient.id} className="border-t">
                           <td className="px-3 py-2">{String(recipient.data.empresa ?? "-")}</td>
                           <td className="px-3 py-2">{recipient.phone_number}</td>
+                          <td className="max-w-56 px-3 py-2">
+                            <span className="line-clamp-2" title={String(recipient.data.oportunidade ?? "-")}>
+                              {String(recipient.data.oportunidade ?? "-")}
+                            </span>
+                          </td>
+                          <td className="max-w-64 px-3 py-2">
+                            <span
+                              className="line-clamp-2"
+                              title={String(recipient.data.automacao_proposta ?? "-")}
+                            >
+                              {String(recipient.data.automacao_proposta ?? "-")}
+                            </span>
+                          </td>
                           <td className="px-3 py-2">
                             <Badge variant={tone(recipient.status)}>
                               {statusLabel[recipient.status] ?? recipient.status}
