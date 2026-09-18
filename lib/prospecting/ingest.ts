@@ -8,6 +8,7 @@ import { enqueueJob } from "@/lib/agent-engine/queue/queue";
 import { prospectingTransaction } from "./db";
 import { prospectingJobEventId } from "./job-event-id";
 import { campaignSettingsSchema, renderProspectingMessage, type Prospect } from "./policy";
+import { qualifyProspect } from "./qualification";
 
 export class ProspectingError extends Error {
   constructor(
@@ -64,6 +65,9 @@ export function summarizeProspectingRun(
         "cooldown",
         "active_negotiation",
         "already_replied",
+        "research_required",
+        "existing_automation_or_crm",
+        "target_profile_required",
       ].includes(item.reason ?? ""),
     ).length,
     eligible: results.filter((item) => item.status === "eligible" || item.queued).length,
@@ -120,6 +124,7 @@ async function ingestOne(
   const settings = campaignSettingsSchema.parse(campaign.settings);
   const score = lead.score ?? 0;
   const consent = lead.whatsapp_opt_in === true;
+  const qualification = qualifyProspect(lead);
   const phones = phoneLookupVariants(lead.telefone);
   const company = companyKey(lead.empresa);
   const site = websiteKey(lead.site);
@@ -205,6 +210,20 @@ async function ingestOne(
       lead_id: null,
       campaign_recipient_id: null,
       reason: "rejected",
+      status: "rejected",
+      score,
+    };
+  if (!qualification.qualified)
+    return {
+      accepted: false,
+      created: false,
+      updated: false,
+      duplicate: false,
+      queued: false,
+      contact_id: null,
+      lead_id: null,
+      campaign_recipient_id: null,
+      reason: qualification.reason,
       status: "rejected",
       score,
     };

@@ -26,6 +26,7 @@ const snapshot: SendSnapshot = {
   valid_message: true,
   dry_run: false,
   consent: true,
+  qualified: true,
   score: 100,
   circuit_breaker_open: false,
   initial: true,
@@ -173,6 +174,13 @@ describe("politica de envio no backend", () => {
       allowed: false,
       terminal: false,
       reason: "circuit_breaker",
+    });
+  });
+  it("bloqueia contato que perdeu a qualificação", () => {
+    expect(decideCampaignSend({ ...snapshot, qualified: false }, settings, now)).toMatchObject({
+      allowed: false,
+      terminal: true,
+      reason: "not_qualified",
     });
   });
 });

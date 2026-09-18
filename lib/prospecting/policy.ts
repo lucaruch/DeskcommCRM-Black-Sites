@@ -66,6 +66,14 @@ export const prospectSchema = z.strictObject({
   roteiro_audio: optionalText(4000),
   roteiro_demonstracao: optionalText(4000),
   proxima_acao: optionalText(1000),
+  pesquisa_concluida: z.boolean().default(false),
+  fontes_pesquisa: z.array(z.url().max(2048)).max(5).default([]),
+  evidencias_pesquisa: z.array(z.string().trim().min(20).max(600)).max(8).default([]),
+  porte_estimado: z
+    .enum(["micro", "pequena", "media", "local", "regional"])
+    .nullable()
+    .default(null),
+  sinais_automacao_existente: z.boolean().default(false),
   status_comercial: z
     .enum([
       "NOVO",
@@ -258,6 +266,7 @@ export interface SendSnapshot {
   valid_message: boolean;
   dry_run: boolean;
   consent: boolean;
+  qualified: boolean;
   score: number;
   circuit_breaker_open: boolean;
   initial: boolean;
@@ -281,6 +290,7 @@ export function decideCampaignSend(
   if (s.opted_out || s.blocked || s.anonymized || s.suppressed)
     return deny("contact_blocked", true);
   if (s.replied) return deny("replied", true);
+  if (!s.qualified) return deny("not_qualified", true);
   if (settings.consent_required && !s.consent) return deny("awaiting_consent", true);
   if (s.score < settings.minimum_score) return deny("score_below_minimum", true);
   if (s.circuit_breaker_open) return deny("circuit_breaker", false);

@@ -12,6 +12,7 @@ import {
 } from "./policy";
 import { recordProspectingEvent } from "./ingest";
 import { prospectingJobEventId } from "./job-event-id";
+import { qualifyProspect } from "./qualification";
 
 export class ProspectingDeferredError extends Error {
   constructor(
@@ -82,6 +83,7 @@ function terminalStatus(reason: string): string {
   if (reason === "score_below_minimum") return "rejected";
   if (reason === "circuit_breaker") return "queued";
   if (reason === "replied") return "replied";
+  if (reason === "not_qualified") return "skipped";
   if (reason === "cancelled") return "cancelled";
   if (reason === "campaign_closed" || reason === "invalid_recipient_or_message") return "skipped";
   return "failed";
@@ -184,6 +186,7 @@ async function reserveSend(
       [row.organization_id, row.contact_id, row.id],
     );
     const consent = current.consent ?? {};
+    const qualification = qualifyProspect(current.data);
     const snapshot = {
       campaign_status: current.campaign_status,
       channel_working: current.channel_status === "WORKING",
@@ -193,6 +196,7 @@ async function reserveSend(
       opted_out: Boolean((consent.marketing as Record<string, unknown> | undefined)?.revoked_at),
       replied: Boolean(current.last_inbound_at),
       consent: current.whatsapp_opt_in,
+      qualified: qualification.qualified,
       score: current.score ?? 0,
       circuit_breaker_open: effectiveSettings.circuit_breaker_open,
       cancelled: [
