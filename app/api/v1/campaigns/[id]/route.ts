@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
+import { resolveAuthDual } from "@/lib/api/auth-dual";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { campaignSettingsSchema } from "@/lib/prospecting/policy";
@@ -33,15 +34,20 @@ async function findCampaign(org: string, id: string) {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const requestId = randomUUID();
-  const authz = await requireRole("viewer", { requestId, resource: "prospecting_campaigns" });
+  const authz = await resolveAuthDual(req, {
+    requestId,
+    resource: "prospecting_campaigns",
+    role: "viewer",
+    scope: "prospecting:read",
+  });
   if (!authz.ok) return authz.response;
   const id = idSchema.safeParse((await context.params).id);
   if (!id.success) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
-  const result = await findCampaign(authz.org.orgId, id.data);
+  const result = await findCampaign(authz.organizationId, id.data);
   if (result.error) return fail("internal_error", "Falha ao ler campanha.", 500, { requestId });
   if (!result.data) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
   const db = createAdminClient();
@@ -51,13 +57,13 @@ export async function GET(
       .select(
         "id,contact_id,lead_id,phone_number,external_id,data,status,message,step,attempts,scheduled_at,sent_at,replied_at,last_error,dry_run,created_at,updated_at",
       )
-      .eq("organization_id", authz.org.orgId)
+      .eq("organization_id", authz.organizationId)
       .eq("campaign_id", id.data)
       .order("created_at", { ascending: false }),
     db
       .from("prospecting_events")
       .select("id,recipient_id,type,metadata,created_at")
-      .eq("organization_id", authz.org.orgId)
+      .eq("organization_id", authz.organizationId)
       .eq("campaign_id", id.data)
       .order("created_at", { ascending: false })
       .limit(300),
