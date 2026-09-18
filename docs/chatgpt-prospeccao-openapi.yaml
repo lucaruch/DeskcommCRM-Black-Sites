@@ -77,7 +77,7 @@ paths:
         - name: id
           in: path
           required: true
-          schema: { type: string, format: uuid }
+          schema: { type: string, description: UUID ou nome exato da campanha }
       responses:
         "200": { description: Campanha, métricas e saúde }
         "404": { description: Campanha não encontrada }

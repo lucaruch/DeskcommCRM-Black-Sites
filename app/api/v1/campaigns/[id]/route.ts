@@ -10,7 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { campaignSettingsSchema } from "@/lib/prospecting/policy";
 
 export const dynamic = "force-dynamic";
-const idSchema = z.uuid();
+const campaignRefSchema = z.string().trim().min(1).max(200);
 const patchSchema = z
   .object({
     name: z.string().trim().min(1).max(200).optional(),
@@ -24,12 +24,22 @@ const patchSchema = z
   })
   .strict();
 
-async function findCampaign(org: string, id: string) {
-  return createAdminClient()
+async function findCampaign(org: string, reference: string) {
+  const db = createAdminClient();
+  const byId = z.uuid().safeParse(reference);
+  if (byId.success) {
+    return db
+      .from("prospecting_campaigns")
+      .select("*")
+      .eq("organization_id", org)
+      .eq("id", byId.data)
+      .maybeSingle();
+  }
+  return db
     .from("prospecting_campaigns")
     .select("*")
     .eq("organization_id", org)
-    .eq("id", id)
+    .eq("name", reference)
     .maybeSingle();
 }
 
@@ -45,11 +55,12 @@ export async function GET(
     scope: "prospecting:read",
   });
   if (!authz.ok) return authz.response;
-  const id = idSchema.safeParse((await context.params).id);
-  if (!id.success) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
-  const result = await findCampaign(authz.organizationId, id.data);
+  const reference = campaignRefSchema.safeParse((await context.params).id);
+  if (!reference.success) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
+  const result = await findCampaign(authz.organizationId, reference.data);
   if (result.error) return fail("internal_error", "Falha ao ler campanha.", 500, { requestId });
   if (!result.data) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
+  const campaignId = result.data.id;
   const db = createAdminClient();
   const [recipients, events] = await Promise.all([
     db
@@ -58,13 +69,13 @@ export async function GET(
         "id,contact_id,lead_id,phone_number,external_id,data,status,message,step,attempts,scheduled_at,sent_at,replied_at,last_error,dry_run,created_at,updated_at",
       )
       .eq("organization_id", authz.organizationId)
-      .eq("campaign_id", id.data)
+      .eq("campaign_id", campaignId)
       .order("created_at", { ascending: false }),
     db
       .from("prospecting_events")
       .select("id,recipient_id,type,metadata,created_at")
       .eq("organization_id", authz.organizationId)
-      .eq("campaign_id", id.data)
+      .eq("campaign_id", campaignId)
       .order("created_at", { ascending: false })
       .limit(300),
   ]);
@@ -111,7 +122,7 @@ export async function PATCH(
   const requestId = randomUUID();
   const authz = await requireRole("manager", { requestId, resource: "prospecting_campaigns" });
   if (!authz.ok) return authz.response;
-  const id = idSchema.safeParse((await context.params).id);
+  const id = z.uuid().safeParse((await context.params).id);
   if (!id.success) return fail("not_found", "Campanha nao encontrada.", 404, { requestId });
   let patch;
   try {

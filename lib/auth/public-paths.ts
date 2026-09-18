@@ -61,9 +61,9 @@ export const PUBLIC_PATHS: RegExp[] = [
   // carona a `/api/v1/messages/[id]`, que NÃO tem suporte a Bearer.
   /^\/api\/v1\/messages$/,
   /^\/api\/v1\/conversations\/open-with-contact$/,
-  // Detalhes de campanha aceitam sessão OU Bearer `dsk_...` para que Actions
-  // server-to-server possam resolver o UUID antes de importar o lote.
-  /^\/api\/v1\/campaigns\/[0-9a-f-]{36}$/,
+  // Detalhes de campanha aceitam sessão OU Bearer `dsk_...`; o Action pode
+  // resolver o UUID usando o nome exato antes de importar o lote.
+  /^\/api\/v1\/campaigns\/[^/]+$/,
   // Upload outbound: primeiro passo do envio de MÍDIA por token. Sem ele, o
   // cartão de fidelidade (a única das automações que não é texto) não teria
   // como sair depois do corte de gateway.
