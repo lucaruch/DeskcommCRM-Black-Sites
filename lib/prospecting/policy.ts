@@ -93,7 +93,7 @@ export const prospectSchema = z.strictObject({
 export type Prospect = z.infer<typeof prospectSchema>;
 
 export const DEFAULT_MESSAGE =
-  "Ola {{responsavel}}, tudo bem? Sou da Black Sites. Vi a {{empresa}} e identifiquei uma possibilidade de {{oportunidade}}. Trabalhamos com automacoes para empresas e achei que poderia fazer sentido para voces. Posso te explicar rapidamente? Se preferir nao receber mensagens, responda SAIR.";
+  "Olá {{responsavel}}, tudo bem? Sou da Black Sites. Vi a {{empresa}} e identifiquei uma possibilidade de {{oportunidade}}. Trabalhamos com automações para empresas e achei que poderia fazer sentido para vocês. Posso te explicar rapidamente? Se isso já estiver resolvido ou não for uma prioridade, pode me avisar que encerro os contatos por aqui.";
 
 export const campaignSettingsSchema = z
   .strictObject({
@@ -134,12 +134,12 @@ export const campaignSettingsSchema = z
         {
           after_hours: 48,
           message:
-            "Ola! Retomando meu contato sobre sites e automacoes da Black Sites. Esse assunto faz sentido para a {{empresa}} neste momento? Se nao quiser receber novas mensagens, responda SAIR.",
+            "Olá! Retomando meu contato sobre sites e automações da Black Sites. Esse assunto faz sentido para a {{empresa}} neste momento? Se já tiverem uma solução, fornecedor ou não houver interesse, pode me avisar que encerro os contatos por aqui.",
         },
         {
           after_hours: 120,
           message:
-            "Este e meu ultimo contato sobre o assunto. Se sites ou automacoes forem uma prioridade para a {{empresa}}, fico a disposicao. Obrigado pelo seu tempo!",
+            "Este é meu último contato sobre o assunto. Se sites ou automações forem uma prioridade para a {{empresa}}, fico à disposição. Caso contrário, não farei novos contatos. Obrigado pelo seu tempo!",
         },
       ]),
     reply_routing: z.enum(["existing", "ai", "human", "queue", "user"]).default("existing"),

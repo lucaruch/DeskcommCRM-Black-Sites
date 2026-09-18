@@ -4,6 +4,23 @@ import { logger } from "@/lib/logger";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
+export function isProspectingNotInterested(text: string | null): boolean {
+  const normalized = (text ?? "")
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase();
+
+  return [
+    /\bsem interesse\b/,
+    /\bnao\s+(?:tenho|quero|possuo)\s+interesse\b/,
+    /\bnao\s+(?:preciso|quero|tenho necessidade)\b/,
+    /\bja\s+(?:tenho|uso|possuo)\b.{0,100}\b(?:site|sistema|crm|bot|automacao|fornecedor|agencia|solucao)\b/,
+    /\b(?:tenho|uso|possuo)\b.{0,80}\b(?:fornecedor|agencia|empresa|solucao)\b/,
+    /\b(?:pode|podem)\s+(?:parar|encerrar|nao mandar|nao enviar)\b/,
+    /\bnao\s+(?:mandem|mandar|enviem|enviar)\s+mais\b/,
+  ].some((pattern) => pattern.test(normalized));
+}
+
 /**
  * Uma resposta encerra a cadencia automatica daquele contato. O Inbox continua
  * sendo a conversa de verdade: este registro apenas impede que um follow-up
@@ -23,11 +40,7 @@ export async function registrarRespostaDeProspeccao(
     if (error || !recipients?.length) return;
 
     const optedOut = ehPedidoDeOptOut(input.texto);
-    const notInterested =
-      !optedOut &&
-      /\b(?:nao|não)\s+(?:tenho|quero|possuo)\s+interesse\b|\bsem\s+interesse\b/i.test(
-        input.texto ?? "",
-      );
+    const notInterested = !optedOut && isProspectingNotInterested(input.texto);
     const nextStatus = optedOut ? "opted_out" : notInterested ? "not_interested" : "replied";
     const now = new Date().toISOString();
     for (const recipient of recipients) {
