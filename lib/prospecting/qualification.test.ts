@@ -29,6 +29,13 @@ describe("qualificação de prospecção", () => {
     expect(qualifyProspect(researched)).toMatchObject({ qualified: true, reason: "qualified" });
   });
 
+  it("aceita empresa pesquisada sem site para oferta contextual de site", () => {
+    expect(qualifyProspect({ ...researched, site: undefined })).toMatchObject({
+      qualified: true,
+      reason: "qualified",
+    });
+  });
+
   it("exclui quem já oferece CRM, automação ou IA", () => {
     expect(
       qualifyProspect({

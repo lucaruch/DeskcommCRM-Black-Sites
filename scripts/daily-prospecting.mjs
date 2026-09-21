@@ -36,6 +36,11 @@ const prospectSchema = {
     "ultima_mensagem",
     "proxima_acao",
     "fontes_verificadas",
+    "pesquisa_concluida",
+    "fontes_pesquisa",
+    "evidencias_pesquisa",
+    "porte_estimado",
+    "sinais_automacao_existente",
   ],
   properties: {
     empresa: { type: "string" },
@@ -44,12 +49,12 @@ const prospectSchema = {
     cidade: { type: "string" },
     estado: { type: "string" },
     nicho: { type: "string" },
-    servicos_observados: { type: "string" },
-    processo_atual: { type: "string" },
+    servicos_observados: { type: "string", minLength: 40 },
+    processo_atual: { type: "string", minLength: 40 },
     score: { type: "integer", minimum: 70, maximum: 100 },
     acesso_decisor: { type: "integer", minimum: 0, maximum: 10 },
-    oportunidade: { type: "string" },
-    motivo_abordagem: { type: "string" },
+    oportunidade: { type: "string", minLength: 40 },
+    motivo_abordagem: { type: "string", minLength: 40 },
     automacao_proposta: { type: "string" },
     fluxo_automacao: { type: "string" },
     mensagem_inicial: { type: "string" },
@@ -58,6 +63,21 @@ const prospectSchema = {
     ultima_mensagem: { type: "string" },
     proxima_acao: { type: "string" },
     fontes_verificadas: { type: "array", minItems: 1, maxItems: 10, items: { type: "string" } },
+    pesquisa_concluida: { type: "boolean" },
+    fontes_pesquisa: {
+      type: "array",
+      minItems: 1,
+      maxItems: 5,
+      items: { type: "string", format: "uri" },
+    },
+    evidencias_pesquisa: {
+      type: "array",
+      minItems: 1,
+      maxItems: 8,
+      items: { type: "string", minLength: 20 },
+    },
+    porte_estimado: { type: "string", enum: ["micro", "pequena", "media", "local", "regional"] },
+    sinais_automacao_existente: { type: "boolean" },
   },
 };
 
@@ -66,7 +86,7 @@ Voce e o pesquisador comercial da Black Sites. Execute uma rodada diaria de pros
 
 Data e hora da rodada: ${generatedAt}. Pesquise somente empresas brasileiras reais e use informacoes publicas verificaveis na web. Pesquise pelo menos 60 candidatas em cidades e estados variados e selecione exatamente ${BATCH_SIZE} com maior potencial, score minimo 70.
 
-Para cada selecionada, confirme no site oficial ou fonte publica confiavel: nome, cidade/UF, telefone comercial publico com DDD, existencia ou ausencia de site oficial, servicos e um processo repetitivo observavel. O campo telefone deve conter somente um telefone brasileiro comercial completo, com DDD, no formato E.164 +55XXXXXXXXXX ou +55XXXXXXXXXXX; se a empresa nao tiver telefone publico verificavel, descarte-a e escolha outra. Se nao encontrar site oficial depois de pesquisar fontes publicas, use site vazio e registre essa ausencia nas fontes/evidencias; nunca invente uma URL. Inclua em fontes_verificadas as URLs consultadas. Nao invente pessoas, cargos, telefones, e-mails, necessidades ou fatos. Nao use dados privados.
+Para cada selecionada, confirme no site oficial ou fonte publica confiavel: nome, cidade/UF, telefone comercial publico com DDD, existencia ou ausencia de site oficial, servicos e um processo repetitivo observavel. O campo telefone deve conter somente um telefone brasileiro comercial completo, com DDD, no formato E.164 +55XXXXXXXXXX ou +55XXXXXXXXXXX; se a empresa nao tiver telefone publico verificavel, descarte-a e escolha outra. Se nao encontrar site oficial depois de pesquisar fontes publicas, use site vazio e registre essa ausencia nas fontes/evidencias; nunca invente uma URL. Preencha pesquisa_concluida=true, fontes_pesquisa com URLs publicas e evidencias_pesquisa com trechos/resumos verificaveis de pelo menos 20 caracteres. Preencha porte_estimado e sinais_automacao_existente=false apenas quando a pesquisa sustentar isso. Inclua em fontes_verificadas as URLs consultadas. Nao invente pessoas, cargos, telefones, e-mails, necessidades ou fatos. Nao use dados privados.
 
 Regra de oferta de site: se site estiver vazio e fizer sentido para o nicho, a automacao_proposta e a mensagem_inicial podem oferecer a criacao de um site profissional junto com a automacao. Se site estiver preenchido, NAO ofereca criacao ou refacao de site e nao diga que a empresa nao tem site; foque somente na oportunidade de automacao observada. Nao ofereca site de forma generica: use a oferta apenas quando a ausencia de site foi verificada e for comercialmente conveniente.
 

@@ -84,7 +84,6 @@ export function qualifyProspect(input: ProspectQualificationInput): ProspectQual
 
   if (
     input.pesquisa_concluida !== true ||
-    !input.site ||
     !sources.length ||
     !evidence.length ||
     !REQUIRED_RESEARCH_TEXT.every((field) => meaningful(input[field], 40)) ||
