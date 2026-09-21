@@ -149,8 +149,8 @@ describe("POST prospeccao", () => {
       }),
     );
   });
-  it("rejeita lote acima de 25 e telefone invalido", async () => {
-    expect((await POST(request({ leads: Array.from({ length: 26 }, () => lead) }))).status).toBe(
+  it("rejeita lote acima de 30 e telefone invalido", async () => {
+    expect((await POST(request({ leads: Array.from({ length: 31 }, () => lead) }))).status).toBe(
       422,
     );
     expect((await POST(request({ ...lead, telefone: "123" }))).status).toBe(422);

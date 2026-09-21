@@ -1,5 +1,6 @@
 const CRM_URL = (process.env.CRM_PROSPECTING_URL || "https://crm.bksly.com.br").replace(/\/$/, "");
 const OPENAI_MODEL = process.env.OPENAI_PROSPECTING_MODEL || "gpt-5.4-mini";
+const BATCH_SIZE = 30;
 const dryRun = process.env.PROSPECTING_DRY_RUN === "true";
 
 const openaiKey = process.env.OPENAI_API_KEY?.trim();
@@ -61,11 +62,13 @@ const prospectSchema = {
 };
 
 const instruction = `
-Voce e o pesquisador comercial da Black Sites. Execute uma rodada diaria de prospeccao B2B para automacao de atendimento, WhatsApp, IA, CRM, follow-up, agenda, formularios e integracoes.
+Voce e o pesquisador comercial da Black Sites. Execute uma rodada diaria de prospeccao B2B para automacao de atendimento, WhatsApp, IA, CRM, follow-up, agenda, formularios, sites e integracoes.
 
-Data e hora da rodada: ${generatedAt}. Pesquise somente empresas brasileiras reais e use informacoes publicas verificaveis na web. Pesquise pelo menos 20 candidatas em cidades e estados variados e selecione exatamente 10 com maior potencial, score minimo 70.
+Data e hora da rodada: ${generatedAt}. Pesquise somente empresas brasileiras reais e use informacoes publicas verificaveis na web. Pesquise pelo menos 60 candidatas em cidades e estados variados e selecione exatamente ${BATCH_SIZE} com maior potencial, score minimo 70.
 
-Para cada selecionada, confirme no site oficial ou fonte publica confiavel: nome, cidade/UF, telefone comercial publico com DDD, site, servicos e um processo repetitivo observavel. O campo telefone deve conter somente um telefone brasileiro comercial completo, com DDD, no formato E.164 +55XXXXXXXXXX ou +55XXXXXXXXXXX; se a empresa nao tiver telefone publico verificavel, descarte-a e escolha outra. Inclua em fontes_verificadas as URLs consultadas. Nao invente pessoas, cargos, telefones, e-mails, necessidades ou fatos. Nao use dados privados.
+Para cada selecionada, confirme no site oficial ou fonte publica confiavel: nome, cidade/UF, telefone comercial publico com DDD, existencia ou ausencia de site oficial, servicos e um processo repetitivo observavel. O campo telefone deve conter somente um telefone brasileiro comercial completo, com DDD, no formato E.164 +55XXXXXXXXXX ou +55XXXXXXXXXXX; se a empresa nao tiver telefone publico verificavel, descarte-a e escolha outra. Se nao encontrar site oficial depois de pesquisar fontes publicas, use site vazio e registre essa ausencia nas fontes/evidencias; nunca invente uma URL. Inclua em fontes_verificadas as URLs consultadas. Nao invente pessoas, cargos, telefones, e-mails, necessidades ou fatos. Nao use dados privados.
+
+Regra de oferta de site: se site estiver vazio e fizer sentido para o nicho, a automacao_proposta e a mensagem_inicial podem oferecer a criacao de um site profissional junto com a automacao. Se site estiver preenchido, NAO ofereca criacao ou refacao de site e nao diga que a empresa nao tem site; foque somente na oportunidade de automacao observada. Nao ofereca site de forma generica: use a oferta apenas quando a ausencia de site foi verificada e for comercialmente conveniente.
 
 O objetivo desta rodada e apenas registrar prospects no CRM para revisao humana. Nao envie WhatsApp, e-mail, DM, ligue, preencha formularios, marque reunioes ou fale com qualquer empresa. Todos os prospects devem entrar sem consentimento de WhatsApp.
 
@@ -94,7 +97,12 @@ async function requestOpenAI() {
             additionalProperties: false,
             required: ["prospects"],
             properties: {
-              prospects: { type: "array", minItems: 10, maxItems: 10, items: prospectSchema },
+              prospects: {
+                type: "array",
+                minItems: BATCH_SIZE,
+                maxItems: BATCH_SIZE,
+                items: prospectSchema,
+              },
             },
           },
         },
@@ -126,8 +134,8 @@ function usablePhone(value) {
 }
 
 function prepareProspects(batch) {
-  if (!Array.isArray(batch?.prospects) || batch.prospects.length !== 10)
-    throw new Error("A pesquisa nao retornou exatamente 10 prospects.");
+  if (!Array.isArray(batch?.prospects) || batch.prospects.length !== BATCH_SIZE)
+    throw new Error(`A pesquisa nao retornou exatamente ${BATCH_SIZE} prospects.`);
   const prospects = batch.prospects.map(({ fontes_verificadas, ...prospect }) => ({
     ...prospect,
     origem: "openai_scheduled_search",

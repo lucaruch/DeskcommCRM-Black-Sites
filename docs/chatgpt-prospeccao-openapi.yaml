@@ -102,7 +102,7 @@ components:
         prospects:
           type: array
           minItems: 1
-          maxItems: 20
+          maxItems: 30
           items: { $ref: "#/components/schemas/Prospect" }
     Prospect:
       type: object

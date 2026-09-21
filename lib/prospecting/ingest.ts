@@ -366,7 +366,11 @@ async function ingestOne(
         ],
       )
     ).rows[0];
-  const message = renderProspectingMessage(settings.message, lead);
+  // A pesquisa pode construir uma abordagem específica para a empresa. O
+  // template da campanha continua sendo o fallback para importações sem texto
+  // personalizado, mas não deve apagar a regra de site verificada pelo agente.
+  const messageTemplate = lead.mensagem_inicial?.trim() || settings.message;
+  const message = renderProspectingMessage(messageTemplate, lead);
   const recipient = (
     await db.query(
       `insert into prospecting_recipients(organization_id,campaign_id,contact_id,lead_id,

@@ -8,8 +8,8 @@ import { prospectSchema } from "@/lib/prospecting/policy";
 export const dynamic = "force-dynamic";
 const batch = z
   .strictObject({
-    prospects: z.array(prospectSchema).min(1).max(20).optional(),
-    leads: z.array(prospectSchema).min(1).max(20).optional(),
+    prospects: z.array(prospectSchema).min(1).max(30).optional(),
+    leads: z.array(prospectSchema).min(1).max(30).optional(),
     source: z.string().trim().min(1).max(200).default("chatgpt_daily_prospecting"),
     run_id: z.string().trim().min(1).max(200).optional(),
     generated_at: z.string().datetime({ offset: true }).nullable().optional(),
