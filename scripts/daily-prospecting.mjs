@@ -68,7 +68,9 @@ const prospectSchema = {
       type: "array",
       minItems: 1,
       maxItems: 5,
-      items: { type: "string", format: "uri" },
+      // Keep URLs as plain strings because the OpenAI structured-output subset
+      // rejects JSON Schema's `uri` format here.
+      items: { type: "string", minLength: 8 },
     },
     evidencias_pesquisa: {
       type: "array",
