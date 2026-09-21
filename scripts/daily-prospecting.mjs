@@ -136,19 +136,25 @@ function usablePhone(value) {
 function prepareProspects(batch) {
   if (!Array.isArray(batch?.prospects) || batch.prospects.length !== BATCH_SIZE)
     throw new Error(`A pesquisa nao retornou exatamente ${BATCH_SIZE} prospects.`);
-  const prospects = batch.prospects.map(({ fontes_verificadas, ...prospect }) => ({
-    ...prospect,
-    origem: "openai_scheduled_search",
-    status_comercial: "PESQUISADO",
-    whatsapp_opt_in: false,
-    whatsapp_opt_in_source: null,
-    whatsapp_opt_in_at: null,
-    metadata: {
-      fontes_verificadas: prospect.fontes_verificadas,
-      automated_run: true,
-      generated_by: OPENAI_MODEL,
-    },
-  }));
+  const prospects = batch.prospects.map(({ fontes_verificadas, ...prospect }) => {
+    const normalized = { ...prospect };
+    // Site ausente é representado pela ausência do campo; string vazia não é
+    // uma URL válida para o contrato do CRM.
+    if (typeof normalized.site === "string" && !normalized.site.trim()) delete normalized.site;
+    return {
+      ...normalized,
+      origem: "openai_scheduled_search",
+      status_comercial: "PESQUISADO",
+      whatsapp_opt_in: false,
+      whatsapp_opt_in_source: null,
+      whatsapp_opt_in_at: null,
+      metadata: {
+        fontes_verificadas,
+        automated_run: true,
+        generated_by: OPENAI_MODEL,
+      },
+    };
+  });
   const invalid = prospects.filter((prospect) => !usablePhone(prospect.telefone));
   if (invalid.length) throw new Error(`Telefone invalido em ${invalid.length} prospect(s).`);
   return prospects;
