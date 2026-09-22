@@ -200,7 +200,9 @@ async function postToCrm(prospects) {
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok)
-    throw new Error(`CRM HTTP ${response.status}: ${body.error?.message || "falha"}`);
+    throw new Error(
+      `CRM HTTP ${response.status}: ${body.error?.message || "falha"} ${body.error?.details ? JSON.stringify(body.error.details) : ""}`,
+    );
   return body.data || body;
 }
 
